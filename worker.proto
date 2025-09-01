@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package worker;
+
+// Add this line
+option go_package = "./workerpb;workerpb";
+
+// Request from Load Generator
+message WorkRequest {
+  int32 duration_ms = 1; // CPU spin duration in milliseconds
+}
+
+// Response from Worker
+message WorkResponse {
+  string status = 1;
+  int64 e2e_latency_ms = 2;
+}
+
+// Service definition
+service WorkerService {
+  rpc DoWork(WorkRequest) returns (WorkResponse);
+}
