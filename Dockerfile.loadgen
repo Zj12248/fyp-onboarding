@@ -1,0 +1,14 @@
+FROM golang:1.22 as build
+WORKDIR /src
+COPY go.mod ./
+RUN go mod download
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/loadgen ./cmd/loadgen
+
+FROM gcr.io/distroless/base-debian12
+WORKDIR /app
+# Logs will go to /logs inside the container; mount a volume to persist.
+VOLUME ["/logs"]
+COPY --from=build /out/loadgen /loadgen
+ENTRYPOINT ["/loadgen"]
