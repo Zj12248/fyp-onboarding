@@ -14,8 +14,8 @@ RUN go mod download
 # ! Best practice for docker thus no need to rebuild above layer. Layering optimisation.
 COPY . .
 
-# Build the Go binary
-RUN go build -o /app/bin/worker .
+# Build the Go binary (worker only)
+RUN go build -o /app/bin/worker ./worker
 
 # ----------------------
 # Stage 2: Ubuntu runtime
