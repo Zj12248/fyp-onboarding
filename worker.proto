@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package worker;
 
-// Add this line
 option go_package = "./workerpb;workerpb";
 
 // Request from Load Generator
