@@ -1,0 +1,16 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: worker
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+        - image: zj3214/worker:latest
+          ports:
+            - containerPort: 50051
+              name: h2c       
+          env:
+            - name: PORT
+              value: "50051"
