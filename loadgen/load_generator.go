@@ -102,7 +102,7 @@ func main() {
 	fmt.Printf("Connecting to worker at %s...\n", *workerAddr)
 
 	// Connect to Worker
-	conn, err := grpc.NewClient(
+	conn, err := grpc.Dial(
 		*workerAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
