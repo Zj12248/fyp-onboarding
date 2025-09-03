@@ -53,7 +53,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	for time.Now().Before(endTime) {
 		if distribution == "uniform" {
 			<-ticker.C
-		} else { // poisson distribution
+		} else { // poisson distribution (not tested/active)
 			meanInterval := float64(time.Second) / float64(rps)
 			delay := time.Duration(rand.ExpFloat64() * meanInterval)
 			time.Sleep(delay)

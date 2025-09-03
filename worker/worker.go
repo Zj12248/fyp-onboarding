@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -18,6 +19,8 @@ type server struct {
 
 func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkResponse, error) {
 	start := time.Now()
+	log.Printf("[Worker] Received request: DurationMs=%d", req.DurationMs)
+	fmt.Printf("[Worker CLI] Request received: DurationMs=%d\n", req.DurationMs)
 
 	// Simulate CPU spin
 	duration := time.Duration(req.DurationMs) * time.Millisecond
@@ -27,6 +30,9 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	}
 
 	e2e := time.Since(start).Milliseconds()
+	log.Printf("[Worker] Finished request: DurationMs=%d, E2ELatencyMs=%d", req.DurationMs, e2e)
+	fmt.Printf("[Worker CLI] Request finished: DurationMs=%d, E2E=%d ms\n", req.DurationMs, e2e)
+
 	return &pb.WorkResponse{
 		Status:       "done",
 		E2ELatencyMs: e2e,
@@ -34,22 +40,23 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 }
 
 func main() {
-	// Read port from environment variable (knative sets port dynamically)
+	// Read port from environment variable (Knative sets port dynamically)
 	port := os.Getenv("PORT")
-
-	if port == "" { // for local testing
+	if port == "" { // local testing
 		port = "50051"
 	}
 
 	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		log.Fatalf("[Worker] failed to listen: %v", err)
 	}
 
 	s := grpc.NewServer()
 	pb.RegisterWorkerServiceServer(s, &server{})
-	log.Printf("Worker listening on :%s", port)
+	log.Printf("[Worker] Listening on port :%s", port)
+	fmt.Printf("[Worker CLI] Worker started on port :%s\n", port)
+
 	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+		log.Fatalf("[Worker] failed to serve: %v", err)
 	}
 }
