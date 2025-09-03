@@ -97,15 +97,20 @@ func main() {
 	defer f.Close()
 	log.SetOutput(f)
 
+	// Print connection attempt
+	fmt.Printf("Connecting to worker at %s...\n", *workerAddr)
+
 	// Connect to Worker
 	conn, err := grpc.NewClient(
 		*workerAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
+		fmt.Printf("Failed to connect: %v\n", err)
 		log.Fatalf("did not connect: %v", err)
 	}
 	defer conn.Close()
+
 	client := pb.NewWorkerServiceClient(conn)
 
 	// Sweep parameters
