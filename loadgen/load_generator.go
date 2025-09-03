@@ -115,10 +115,10 @@ func main() {
 	fmt.Printf("Connection Successful\n")
 	client := pb.NewWorkerServiceClient(conn)
 
-	// Sweep parameters
-	rpsValues := []int{5, 10, 15, 20, 25, 30, 35, 40, 45, 50}
+	// Sweep parameters(reduced for testing)
+	rpsValues := []int{5, 10} //, 15, 20, 25, 30, 35, 40, 45, 50}
 	distributions := []string{"uniform", "poisson"}
-	durations := []int32{100, 200, 300, 400, 500, 600, 700, 800, 900, 1000}
+	durations := []int32{100, 200} // 300, 400, 500, 600, 700, 800, 900, 1000}
 
 	fmt.Printf("Performing Grid Search\n")
 	// Full grid search
