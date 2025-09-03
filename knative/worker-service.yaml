@@ -11,6 +11,3 @@ spec:
           ports:
             - containerPort: 50051
               name: h2c       
-          env:
-            - name: PORT
-              value: "50051"

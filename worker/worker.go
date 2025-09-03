@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"os"
 	"time"
 
 	pb "fyp-onboarding/workerpb"
@@ -33,14 +34,21 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 }
 
 func main() {
-	lis, err := net.Listen("tcp", ":50051")
+	// Read port from environment variable (knative sets port dynamically)
+	port := os.Getenv("PORT")
+
+	if port == "" { // for local testing
+		port = "50051"
+	}
+
+	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
 	s := grpc.NewServer()
 	pb.RegisterWorkerServiceServer(s, &server{})
-	log.Println("Worker listening on :50051")
+	log.Printf("Worker listening on :%s", port)
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	pb "fyp-onboarding/workerpb"
 	"log"
@@ -86,6 +87,11 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 }
 
 func main() {
+	// Command-line flag for worker host:port
+	// configure port through CLI ( go run ./loadgen/load_generator.go --worker=localhost:8080 )
+	workerAddr := flag.String("worker", "localhost:50051", "Worker gRPC host:port")
+	flag.Parse()
+
 	// Open log file
 	f, _ := os.Create("load.log")
 	defer f.Close()
@@ -93,7 +99,7 @@ func main() {
 
 	// Connect to Worker
 	conn, err := grpc.NewClient(
-		"localhost:50051",
+		*workerAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
@@ -108,7 +114,6 @@ func main() {
 	durations := []int32{100, 200, 300, 400, 500, 600, 700, 800, 900, 1000}
 
 	// Full grid search
-	// returns [index, value] when indexing list
 	for _, rps := range rpsValues {
 		for _, dist := range distributions {
 			for _, dur := range durations {
