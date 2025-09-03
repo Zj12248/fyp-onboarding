@@ -16,7 +16,7 @@ import (
 )
 
 func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, distribution string) {
-
+	fmt.Printf("Running Experiment with RPS%d, DUR%d\n", rps, durationMs)
 	// Generate unique log file per experiment (grid search)
 	runID := fmt.Sprintf("RPS%d_Dur%d_%s_%s",
 		rps, durationMs, distribution, time.Now().Format("150405"))
@@ -120,6 +120,7 @@ func main() {
 	distributions := []string{"uniform", "poisson"}
 	durations := []int32{100, 200, 300, 400, 500, 600, 700, 800, 900, 1000}
 
+	fmt.Printf("Performing Grid Search\n")
 	// Full grid search
 	for _, rps := range rpsValues {
 		for _, dist := range distributions {
