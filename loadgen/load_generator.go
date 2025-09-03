@@ -36,7 +36,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	logger.Printf("Starting experiment: RPS=%d, Duration=%dms, Dist=%s", rps, durationMs, distribution)
 
 	// 12 minutes per run
-	endTime := time.Now().Add(12 * time.Minute)
+	endTime := time.Now().Add(1 * time.Minute)
 
 	// create sync group to allow sending of request while worker is still busy with previous request. (unblock)
 	var wg sync.WaitGroup
