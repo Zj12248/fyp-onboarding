@@ -89,7 +89,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 func main() {
 	// Command-line flag for worker host:port
 	// configure port through CLI ( go run ./loadgen/load_generator.go --worker=localhost:8080 )
-	fmt.Printf("Loadgen Script running")
+	fmt.Printf("Loadgen Script running\n")
 	workerAddr := flag.String("worker", "localhost:50051", "Worker gRPC host:port")
 	flag.Parse()
 
@@ -112,6 +112,7 @@ func main() {
 	}
 	defer conn.Close()
 
+	fmt.Printf("Connection Successful\n")
 	client := pb.NewWorkerServiceClient(conn)
 
 	// Sweep parameters
