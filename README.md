@@ -31,9 +31,9 @@ A project to familiarise benchmarking on vhive, knative.
 ## Steps to run 
 1) Setup single cluster node according to vhive-quickstart guide/utilise script.
 2) Clone this repo into the node
-3) If worker image not pushed into docker hub(or other registry), follow steps 4-6. Else skip.
+3) If worker image not pushed into docker hub(or other registry), follow steps 4-6. (Ensure docker installed - sudo apt install docker.io) Else skip.
 4) Build image with following command: docker build -t <userid>/worker:latest -f worker/Dockerfile .
-5) Docker login: docker login
+5) Docker login: docker login -u <username>
 6) Push image into registry: docker push <userid>/worker:latest
 7) Deploy into knative: kubectl apply -f worker.yaml
 8) Check worker status if ready: kubectl get ksvc worker
