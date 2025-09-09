@@ -35,7 +35,7 @@ A project to familiarise benchmarking on vhive, knative.
 4. Build the image: `docker build -t <userid>/worker:latest -f Dockerfile .`
 5. Log in to Docker: `docker login -u <username>`
 6. Push the image into the registry: `docker push <userid>/worker:latest`
-7. Deploy into Knative: `kubectl apply -f worker.yaml`
+7. Deploy into Knative: `kubectl apply -f knative/worker.yaml`
 8. Check if the worker is ready: `kubectl get ksvc worker`
 9. Get the Knative service URL (endpoint). Default external port is **80**.
 10. Run the Load Generator (replace `<URL:80>` with the worker endpoint): `go run loadgen/load_generator.go --worker=<URL:80>`
