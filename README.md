@@ -32,7 +32,7 @@ A project to familiarise benchmarking on vhive, knative.
 1. Setup a single cluster node according to the [vHive Quickstart Guide](https://github.com/ease-lab/vhive) or use the provided setup script.
 2. Clone this repository into the node.
 3. If the worker image is **not** pushed into Docker Hub (or another registry), follow steps 4–6. *(Ensure Docker is installed: `sudo apt install docker.io`)* Otherwise, skip to step 7.
-4. Build the image: `docker build -t <userid>/worker:latest -f worker/Dockerfile .`
+4. Build the image: `docker build -t <userid>/worker:latest -f Dockerfile .`
 5. Log in to Docker: `docker login -u <username>`
 6. Push the image into the registry: `docker push <userid>/worker:latest`
 7. Deploy into Knative: `kubectl apply -f worker.yaml`
