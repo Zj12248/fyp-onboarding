@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"time"
@@ -22,23 +23,26 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	log.Printf("[Worker] Received request: DurationMs=%d", req.DurationMs)
 	fmt.Printf("[Worker CLI] Request received: DurationMs=%d\n", req.DurationMs)
 
-	// Simulate CPU spin with simple workload
 	duration := time.Duration(req.DurationMs) * time.Millisecond
 	end := time.Now().Add(duration)
 
 	var count uint64
 	val := 1.0
 
-	for time.Now().Before(end) {
-		// Simple math to consume CPU cycles
-		val = val*1.0001 + 1.0
+	for time.Now().Before(end) { // Busy spin
+		for i := 0; i < 1000; i++ { // inner loop to increase CPU work
+			val = val*1.0001 + 1.0
+			val = val/1.0001 + 0.9999
+			val = val*val - val/2 + 3.14159
+			val = val / (val + 1.0) // some expensive floating-point ops
 
-		// Prevent runaway growth
-		if val > 1e6 {
-			val = 1.0
+			// Prevent runaway growth
+			if val > 1e6 {
+				val = math.Mod(val, 99999)
+			}
+
+			count++
 		}
-
-		count++
 	}
 
 	e2e := time.Since(start).Milliseconds()
