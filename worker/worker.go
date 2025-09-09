@@ -22,16 +22,28 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	log.Printf("[Worker] Received request: DurationMs=%d", req.DurationMs)
 	fmt.Printf("[Worker CLI] Request received: DurationMs=%d\n", req.DurationMs)
 
-	// Simulate CPU spin
+	// Simulate CPU spin with simple workload
 	duration := time.Duration(req.DurationMs) * time.Millisecond
 	end := time.Now().Add(duration)
+
+	var count uint64
+	val := 1.0
+
 	for time.Now().Before(end) {
-		// busy-wait
+		// Simple math to consume CPU cycles
+		val = val*1.0001 + 1.0
+
+		// Prevent runaway growth
+		if val > 1e6 {
+			val = 1.0
+		}
+
+		count++
 	}
 
 	e2e := time.Since(start).Milliseconds()
-	log.Printf("[Worker] Finished request: DurationMs=%d, E2ELatencyMs=%d", req.DurationMs, e2e)
-	fmt.Printf("[Worker CLI] Request finished: DurationMs=%d, E2E=%d ms\n", req.DurationMs, e2e)
+	log.Printf("[Worker] Finished request: DurationMs=%d, E2ELatencyMs=%d, Iterations=%d", req.DurationMs, e2e, count)
+	fmt.Printf("[Worker CLI] Request finished: DurationMs=%d, E2E=%d ms, Iterations=%d\n", req.DurationMs, e2e, count)
 
 	return &pb.WorkResponse{
 		Status:       "done",
