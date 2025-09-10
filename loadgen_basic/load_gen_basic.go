@@ -53,6 +53,6 @@ func main() {
 	}
 
 	e2e := time.Since(start).Milliseconds()
-	fmt.Printf("Response: Status=%s, WorkerE2E=%dms, ClientE2E=%dms\n",
-		resp.Status, resp.E2ELatencyMs, e2e)
+	fmt.Printf("Response: Status=%s, WorkerE2E=%dms, ClientE2E=%dms, AvgCPUFreq=%d kHz\n",
+		resp.Status, resp.E2ELatencyMs, e2e, resp.AvgCpuFreqKhz)
 }

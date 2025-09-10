@@ -16,8 +16,9 @@ import (
 )
 
 type batchResult struct {
-	workerE2E int64
-	clientE2E int64
+	workerE2E     int64
+	clientE2E     int64
+	avgCpuFreqKhz int64 // store CPU freq from worker response
 }
 
 func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, distribution string) {
@@ -61,15 +62,17 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 			case <-batchTicker.C:
 				batchMutex.Lock()
 				if len(batchResults) > 0 {
-					var sumWorker, sumClient int64
+					var sumWorker, sumClient, sumFreq int64
 					for _, r := range batchResults {
 						sumWorker += r.workerE2E
 						sumClient += r.clientE2E
+						sumFreq += r.avgCpuFreqKhz
 					}
 					avgWorker := float64(sumWorker) / float64(len(batchResults))
 					avgClient := float64(sumClient) / float64(len(batchResults))
-					logger.Printf("30s Batch Avg (last %d reqs): WorkerE2E=%.2f ms, ClientE2E=%.2f ms",
-						len(batchResults), avgWorker, avgClient)
+					avgFreq := float64(sumFreq) / float64(len(batchResults))
+					logger.Printf("30s Batch Avg (last %d reqs): WorkerE2E=%.2f ms, ClientE2E=%.2f ms, AvgCPUFreq=%.2f kHz",
+						len(batchResults), avgWorker, avgClient, avgFreq)
 					batchResults = []batchResult{} // reset for next interval
 				}
 				batchMutex.Unlock()
@@ -108,8 +111,9 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 			// Store result for 30s batch
 			batchMutex.Lock()
 			batchResults = append(batchResults, batchResult{
-				workerE2E: resp.E2ELatencyMs,
-				clientE2E: e2e,
+				workerE2E:     resp.E2ELatencyMs,
+				clientE2E:     e2e,
+				avgCpuFreqKhz: resp.AvgCpuFreqKhz, // log CPU freq from worker
 			})
 			batchMutex.Unlock()
 		}(reqCount)
@@ -121,15 +125,17 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	// log remaining batch if any
 	batchMutex.Lock()
 	if len(batchResults) > 0 {
-		var sumWorker, sumClient int64
+		var sumWorker, sumClient, sumFreq int64
 		for _, r := range batchResults {
 			sumWorker += r.workerE2E
 			sumClient += r.clientE2E
+			sumFreq += r.avgCpuFreqKhz
 		}
 		avgWorker := float64(sumWorker) / float64(len(batchResults))
 		avgClient := float64(sumClient) / float64(len(batchResults))
-		logger.Printf("Final Batch Avg (last %d reqs): WorkerE2E=%.2f ms, ClientE2E=%.2f ms",
-			len(batchResults), avgWorker, avgClient)
+		avgFreq := float64(sumFreq) / float64(len(batchResults))
+		logger.Printf("Final Batch Avg (last %d reqs): WorkerE2E=%.2f ms, ClientE2E=%.2f ms, AvgCPUFreq=%.2f kHz",
+			len(batchResults), avgWorker, avgClient, avgFreq)
 	}
 	batchMutex.Unlock()
 
@@ -169,7 +175,7 @@ func main() {
 	// Sweep parameters(reduced for testing)
 	rpsValues := []int{50, 100}          //, 15, 20, 25, 30, 35, 40, 45, 50}
 	distributions := []string{"uniform"} // , "poisson"}
-	durations := []int32{500, 1000}      // 300, 400, 500, 600, 700, 800, 900, 1000}
+	durations := []int32{500, 1000}      // 300, 400, 500, 600, 700, 800, 900, 1000
 
 	fmt.Printf("Performing Grid Search\n")
 	// Full grid search
