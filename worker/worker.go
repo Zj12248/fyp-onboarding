@@ -28,18 +28,13 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	duration := time.Duration(req.DurationMs) * time.Millisecond
 	end := time.Now().Add(duration)
 
-	// Safety timeout (10x requested duration)
-	hardTimeout := 10 * duration
-	ctx, cancel := context.WithTimeout(ctx, hardTimeout)
-	defer cancel()
-
 	var count uint64
 	val := 1.0
 
-	// Channel to stop sampling goroutine
+	// Channel to stop sampling cpu freq
 	stopCh := make(chan struct{})
 	freqSamples := make([]int64, 0)
-	sampleInterval := 200 * time.Millisecond
+	sampleInterval := 100 * time.Millisecond
 
 	// Start concurrent CPU frequency sampler
 	go func() {
@@ -57,33 +52,19 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 		}
 	}()
 
-	// Busy spin loop with timeout check
-	var timedOut bool
-loop:
-	for {
-		select {
-		case <-ctx.Done():
-			// Hard timeout triggered
-			log.Printf("[Worker] HARD TIMEOUT reached (>%v), stopping work", hardTimeout)
-			timedOut = true
-			break loop
-		default:
-			if time.Now().After(end) {
-				// Requested duration reached
-				break loop
-			}
-			val = val*1.0001 + 0.9999
-			count++
-			if val > 1e6 {
-				val = math.Mod(val, 99999)
-			}
+	// Busy spin loop
+	for time.Now().Before(end) {
+		val = val*1.0001 + 0.9999
+		count++
+		if val > 1e6 {
+			val = math.Mod(val, 99999)
 		}
 	}
 
 	// Stop sampler
 	close(stopCh)
 
-	// Compute average freq
+	// Compute average CPU frequency
 	var avgFreq int64
 	if len(freqSamples) > 0 {
 		var sum int64
@@ -96,9 +77,6 @@ loop:
 	e2e := time.Since(start).Milliseconds()
 
 	status := "done"
-	if timedOut {
-		status = "timeout"
-	}
 
 	log.Printf("[Worker] Finished request: DurationMs=%d, E2ELatencyMs=%d, Iterations=%d, AvgCPUFreq=%d kHz, Status=%s",
 		req.DurationMs, e2e, count, avgFreq, status)
