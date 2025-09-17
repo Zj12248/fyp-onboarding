@@ -28,6 +28,11 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	duration := time.Duration(req.DurationMs) * time.Millisecond
 	end := time.Now().Add(duration)
 
+	// Safety timeout (e.g., request duration + buffer)
+	timeout := duration * 5
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	var count uint64
 	val := 1.0
 
@@ -48,18 +53,34 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 				}
 			case <-stopCh:
 				return
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
 
+	status := "done"
+
 	// Busy spin loop
-	for time.Now().Before(end) {
-		val = val*1.0001 + 0.9999
-		val = math.Sin(val) + math.Sqrt(val)
-		val = math.Log(val + 1.0)
-		count++
-		if val > 1e6 {
-			val = math.Mod(val, 99999)
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("[Worker] Timeout reached or client canceled")
+			status = "timeout"
+			break loop
+		default:
+			if time.Now().After(end) {
+				// Work finished normally
+				break loop
+			}
+			val = val*1.0001 + 0.9999
+			val = math.Sin(val) + math.Sqrt(val)
+			val = math.Log(val + 1.0)
+			count++
+			if val > 1e6 {
+				val = math.Mod(val, 99999)
+			}
 		}
 	}
 
@@ -77,8 +98,6 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	}
 
 	e2e := time.Since(start).Milliseconds()
-
-	status := "done"
 
 	log.Printf("[Worker] Finished request: DurationMs=%d, E2ELatencyMs=%d, Iterations=%d, AvgCPUFreq=%d kHz, Status=%s",
 		req.DurationMs, e2e, count, avgFreq, status)
