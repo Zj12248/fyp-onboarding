@@ -199,9 +199,9 @@ func main() {
 	client := pb.NewWorkerServiceClient(conn)
 
 	// Sweep parameters(reduced for testing)
-	rpsValues := []int{5, 20, 100}       //, 15, 20, 25, 30, 35, 40, 45, 50}
+	rpsValues := []int{15, 100}          //, 15, 20, 25, 30, 35, 40, 45, 50}
 	distributions := []string{"uniform"} // , "poisson"}
-	durations := []int32{100, 400, 1000} // 300, 400, 500, 600, 700, 800, 900, 1000
+	durations := []int32{100, 1000}      // 300, 400, 500, 600, 700, 800, 900, 1000
 
 	fmt.Printf("Performing Grid Search\n")
 	// Full grid search
