@@ -7,9 +7,10 @@ spec:
   template:
     metadata:
       annotations:
-        autoscaling.knative.dev/minScale: "1"   # Ensure at least 1 pod is always running
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "2"
     spec:
-      containerConcurrency: 1   # Only 1 request per pod at a time
+      containerConcurrency: 1
       containers:
         - image: zj3214/worker:latest
           ports:
