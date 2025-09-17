@@ -35,8 +35,9 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	defer f.Close()
 	logger := log.New(f, "", log.LstdFlags)
 
-	runMin := 2
-	endTime := time.Now().Add(time.Duration(runMin) * time.Minute)
+	// Warmup & experiment durations
+	warmupMin := 2
+	expMin := 3
 
 	var wg sync.WaitGroup
 	var ticker *time.Ticker
@@ -55,7 +56,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 
 	done := make(chan struct{})
 
-	// Goroutine to log batch averages every 30s
+	// Goroutine to log batch averages every 30s (only during experiment phase)
 	go func() {
 		for {
 			select {
@@ -82,10 +83,35 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 		}
 	}()
 
-	for time.Now().Before(endTime) {
+	// --- Warmup Phase ---
+	fmt.Printf("Warmup for %d minutes (discarding results)...\n", warmupMin)
+	warmupEnd := time.Now().Add(time.Duration(warmupMin) * time.Minute)
+	for time.Now().Before(warmupEnd) {
 		if distribution == "uniform" {
 			<-ticker.C
-		} else { // poisson
+		} else {
+			meanInterval := float64(time.Second) / float64(rps)
+			delay := time.Duration(rand.ExpFloat64() * meanInterval)
+			time.Sleep(delay)
+		}
+
+		// Send requests but discard results
+		go func() {
+			_, _ = client.DoWork(
+				context.Background(),
+				&pb.WorkRequest{DurationMs: durationMs},
+			)
+		}()
+	}
+
+	// --- Experiment Phase ---
+	fmt.Printf("Running experiment for %d minutes...\n", expMin)
+	expEnd := time.Now().Add(time.Duration(expMin) * time.Minute)
+
+	for time.Now().Before(expEnd) {
+		if distribution == "uniform" {
+			<-ticker.C
+		} else {
 			meanInterval := float64(time.Second) / float64(rps)
 			delay := time.Duration(rand.ExpFloat64() * meanInterval)
 			time.Sleep(delay)
@@ -113,7 +139,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 			batchResults = append(batchResults, batchResult{
 				workerE2E:     resp.E2ELatencyMs,
 				clientE2E:     e2e,
-				avgCpuFreqKhz: resp.AvgCpuFreqKhz, // log CPU freq from worker
+				avgCpuFreqKhz: resp.AvgCpuFreqKhz,
 			})
 			batchMutex.Unlock()
 		}(reqCount)
@@ -173,9 +199,9 @@ func main() {
 	client := pb.NewWorkerServiceClient(conn)
 
 	// Sweep parameters(reduced for testing)
-	rpsValues := []int{50, 100}          //, 15, 20, 25, 30, 35, 40, 45, 50}
+	rpsValues := []int{5, 20, 100}       //, 15, 20, 25, 30, 35, 40, 45, 50}
 	distributions := []string{"uniform"} // , "poisson"}
-	durations := []int32{500, 1000}      // 300, 400, 500, 600, 700, 800, 900, 1000
+	durations := []int32{100, 400, 1000} // 300, 400, 500, 600, 700, 800, 900, 1000
 
 	fmt.Printf("Performing Grid Search\n")
 	// Full grid search

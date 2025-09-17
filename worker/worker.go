@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math"
 	"net"
@@ -29,6 +28,11 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	duration := time.Duration(req.DurationMs) * time.Millisecond
 	end := time.Now().Add(duration)
 
+	// Safety timeout (10x requested duration)
+	hardTimeout := 10 * duration
+	ctx, cancel := context.WithTimeout(ctx, hardTimeout)
+	defer cancel()
+
 	var count uint64
 	val := 1.0
 
@@ -53,18 +57,26 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 		}
 	}()
 
-	// Busy spin loop
-	for time.Now().Before(end) {
-		for i := 0; i < 1000; i++ {
-			val = val*1.0001 + 1.0
-			val = val/1.0001 + 0.9999
-			val = val*val - val/2 + 3.14159
-			val = val / (val + 1.0)
-
+	// Busy spin loop with timeout check
+	var timedOut bool
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			// Hard timeout triggered
+			log.Printf("[Worker] HARD TIMEOUT reached (>%v), stopping work", hardTimeout)
+			timedOut = true
+			break loop
+		default:
+			if time.Now().After(end) {
+				// Requested duration reached
+				break loop
+			}
+			val = val*1.0001 + 0.9999
+			count++
 			if val > 1e6 {
 				val = math.Mod(val, 99999)
 			}
-			count++
 		}
 	}
 
@@ -82,13 +94,19 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	}
 
 	e2e := time.Since(start).Milliseconds()
-	log.Printf("[Worker] Finished request: DurationMs=%d, E2ELatencyMs=%d, Iterations=%d, AvgCPUFreq=%d kHz",
-		req.DurationMs, e2e, count, avgFreq)
-	fmt.Printf("[Worker CLI] Request finished: DurationMs=%d, E2E=%d ms, Iterations=%d, AvgCPUFreq=%d kHz\n",
-		req.DurationMs, e2e, count, avgFreq)
+
+	status := "done"
+	if timedOut {
+		status = "timeout"
+	}
+
+	log.Printf("[Worker] Finished request: DurationMs=%d, E2ELatencyMs=%d, Iterations=%d, AvgCPUFreq=%d kHz, Status=%s",
+		req.DurationMs, e2e, count, avgFreq, status)
+	fmt.Printf("[Worker CLI] Request finished: DurationMs=%d, E2E=%d ms, Iterations=%d, AvgCPUFreq=%d kHz, Status=%s\n",
+		req.DurationMs, e2e, count, avgFreq, status)
 
 	return &pb.WorkResponse{
-		Status:        "done",
+		Status:        status,
 		E2ELatencyMs:  e2e,
 		AvgCpuFreqKhz: avgFreq,
 	}, nil
@@ -96,7 +114,7 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 
 // Helper: read current CPU frequency (core 0)
 func getCPUFreq() (int64, error) {
-	data, err := ioutil.ReadFile("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
+	data, err := os.ReadFile("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
 	if err != nil {
 		return 0, err
 	}
