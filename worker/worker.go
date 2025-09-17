@@ -55,6 +55,8 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	// Busy spin loop
 	for time.Now().Before(end) {
 		val = val*1.0001 + 0.9999
+		val = math.Sin(val) + math.Sqrt(val)
+		val = math.Log(val + 1.0)
 		count++
 		if val > 1e6 {
 			val = math.Mod(val, 99999)
