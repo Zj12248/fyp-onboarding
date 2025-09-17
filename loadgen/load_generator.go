@@ -37,7 +37,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 
 	// Warmup & experiment durations
 	warmupMin := 0
-	expMin := 3
+	expMin := 1
 
 	var wg sync.WaitGroup
 	var ticker *time.Ticker
@@ -199,7 +199,7 @@ func main() {
 	client := pb.NewWorkerServiceClient(conn)
 
 	// Sweep parameters(reduced for testing)
-	rpsValues := []int{50}               //, 15, 20, 25, 30, 35, 40, 45, 50}
+	rpsValues := []int{6}                //, 15, 20, 25, 30, 35, 40, 45, 50}
 	distributions := []string{"uniform"} // , "poisson"}
 	durations := []int32{1000}           // 300, 400, 500, 600, 700, 800, 900, 1000
 
