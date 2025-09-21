@@ -7,11 +7,16 @@ spec:
   template:
     metadata:
       annotations:
-        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/minScale: "1"   # at least 1 pod
     spec:
-      containerConcurrency: 1
+      containerConcurrency: 1                   # 1 request per pod
       containers:
         - image: zj3214/worker:latest
           ports:
             - containerPort: 50051
               name: h2c
+          resources:
+            requests:
+              cpu: "1"                          # request 1 CPU core
+            limits:
+              cpu: "1"                          # limit to 1 CPU core
