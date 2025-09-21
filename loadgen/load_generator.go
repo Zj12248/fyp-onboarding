@@ -38,7 +38,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 
 	// Warmup & experiment durations
 	warmupMin := 0
-	expMin := 1
+	expMin := 2
 
 	var wg sync.WaitGroup
 	var ticker *time.Ticker
@@ -225,9 +225,9 @@ func main() {
 	client := pb.NewWorkerServiceClient(conn)
 
 	// Sweep parameters (reduced for testing)
-	rpsValues := []int{5, 20, 50}
+	rpsValues := []int{30, 50, 80}
 	distributions := []string{"uniform"}
-	durations := []int32{100, 1000}
+	durations := []int32{1000}
 
 	fmt.Printf("Performing Grid Search\n")
 	for _, rps := range rpsValues {
