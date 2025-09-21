@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	pb "fyp-onboarding/workerpb"
@@ -16,19 +17,40 @@ import (
 	"google.golang.org/grpc"
 )
 
+// global mutex to enforce concurrency = 1
+var mu sync.Mutex
+
+// track active requests (should always be <= 1)
+var activeRequests int32
+var activeMu sync.Mutex
+
 type server struct {
 	pb.UnimplementedWorkerServiceServer
 }
 
 func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkResponse, error) {
-	start := time.Now()
-	log.Printf("[Worker] Received request: DurationMs=%d", req.DurationMs)
-	fmt.Printf("[Worker CLI] Request received: DurationMs=%d\n", req.DurationMs)
+	log.Printf("[Worker] Request received: DurationMs=%d, Timestamp=%s", req.DurationMs, time.Now().Format(time.RFC3339Nano))
 
+	// Track waiting for lock
+	log.Println("[Worker] Waiting for mutex lock...")
+	mu.Lock()
+	defer mu.Unlock()
+	log.Println("[Worker] Acquired mutex lock!")
+
+	// Increment active counter
+	activeMu.Lock()
+	activeRequests++
+	if activeRequests > 1 {
+		log.Printf("[ERROR] Concurrency >1! activeRequests=%d", activeRequests)
+	} else {
+		log.Printf("[Worker] Active requests=%d", activeRequests)
+	}
+	activeMu.Unlock()
+
+	start := time.Now()
 	duration := time.Duration(req.DurationMs) * time.Millisecond
 	end := time.Now().Add(duration)
 
-	// Safety timeout (e.g., request duration + buffer)
 	timeout := duration * 5
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -36,12 +58,10 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	var count uint64
 	val := 1.0
 
-	// Channel to stop sampling cpu freq
 	stopCh := make(chan struct{})
 	freqSamples := make([]int64, 0)
 	sampleInterval := 100 * time.Millisecond
 
-	// Start concurrent CPU frequency sampler
 	go func() {
 		ticker := time.NewTicker(sampleInterval)
 		defer ticker.Stop()
@@ -61,17 +81,14 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 
 	status := "done"
 
-	// Busy spin loop
 loop:
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("[Worker] Timeout reached or client canceled")
 			status = "timeout"
 			break loop
 		default:
 			if time.Now().After(end) {
-				// Work finished normally
 				break loop
 			}
 			val = val*1.0001 + 0.9999
@@ -84,10 +101,8 @@ loop:
 		}
 	}
 
-	// Stop sampler
 	close(stopCh)
 
-	// Compute average CPU frequency
 	var avgFreq int64
 	if len(freqSamples) > 0 {
 		var sum int64
@@ -103,6 +118,12 @@ loop:
 		req.DurationMs, e2e, count, avgFreq, status)
 	fmt.Printf("[Worker CLI] Request finished: DurationMs=%d, E2E=%d ms, Iterations=%d, AvgCPUFreq=%d kHz, Status=%s\n",
 		req.DurationMs, e2e, count, avgFreq, status)
+
+	// Decrement active counter
+	activeMu.Lock()
+	activeRequests--
+	activeMu.Unlock()
+	log.Println("[Worker] Released mutex lock!")
 
 	return &pb.WorkResponse{
 		Status:        status,
@@ -122,9 +143,8 @@ func getCPUFreq() (int64, error) {
 }
 
 func main() {
-	// Read port from environment variable (Knative sets port dynamically)
 	port := os.Getenv("PORT")
-	if port == "" { // local testing
+	if port == "" {
 		port = "50051"
 	}
 
@@ -135,6 +155,7 @@ func main() {
 
 	s := grpc.NewServer()
 	pb.RegisterWorkerServiceServer(s, &server{})
+
 	log.Printf("[Worker] Listening on port :%s", port)
 	fmt.Printf("[Worker CLI] Worker started on port :%s\n", port)
 
