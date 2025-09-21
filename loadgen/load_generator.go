@@ -53,13 +53,13 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	batchResults := []batchResult{}
 	var batchMutex sync.Mutex
 
-	// Time-based batch ticker (30s)
-	batchTicker := time.NewTicker(30 * time.Second)
+	// Time-based batch ticker (20s)
+	batchTicker := time.NewTicker(20 * time.Second)
 	defer batchTicker.Stop()
 
 	done := make(chan struct{})
 
-	// Goroutine to log batch averages every 30s (only during experiment phase)
+	// Goroutine to log batch averages every 20s (only during experiment phase)
 	go func() {
 		for {
 			select {
@@ -75,7 +75,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 					avgWorker := float64(sumWorker) / float64(len(batchResults))
 					avgClient := float64(sumClient) / float64(len(batchResults))
 					avgFreq := float64(sumFreq) / float64(len(batchResults))
-					logger.Printf("30s Batch Avg (last %d reqs): WorkerE2E=%.2f ms, ClientE2E=%.2f ms, AvgCPUFreq=%.2f kHz",
+					logger.Printf("20s Batch Avg (last %d reqs): WorkerE2E=%.2f ms, ClientE2E=%.2f ms, AvgCPUFreq=%.2f kHz",
 						len(batchResults), avgWorker, avgClient, avgFreq)
 					batchResults = []batchResult{} // reset
 				}
@@ -162,7 +162,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 				return
 			}
 
-			// Store result for 30s batch
+			// Store result for 20s batch
 			batchMutex.Lock()
 			batchResults = append(batchResults, batchResult{
 				workerE2E:     resp.E2ELatencyMs,
