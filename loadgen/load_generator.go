@@ -137,7 +137,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 			start := time.Now()
 
 			// Timeout = 10x requested spin duration
-			timeout := time.Duration(durationMs) * 10 * time.Millisecond
+			timeout := time.Duration(durationMs) * 20 * time.Millisecond
 			ctx, cancel := context.WithTimeout(expCtx, timeout)
 			defer cancel()
 
