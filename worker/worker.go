@@ -85,10 +85,12 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	fmt.Printf("[Worker CLI] Request finished: DurationMs=%d, E2E=%d ms, Iterations=%d, AvgCPUFreq=%d kHz, Status=%s\n",
 		req.DurationMs, e2e, count, avgFreq, status)
 
+	// Return count as part of response
 	return &pb.WorkResponse{
 		Status:        status,
 		E2ELatencyMs:  e2e,
 		AvgCpuFreqKhz: avgFreq,
+		Iterations:    count,
 	}, nil
 }
 
