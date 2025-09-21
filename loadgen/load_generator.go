@@ -225,7 +225,7 @@ func main() {
 	client := pb.NewWorkerServiceClient(conn)
 
 	// Sweep parameters (reduced for testing)
-	rpsValues := []int{50}
+	rpsValues := []int{25}
 	distributions := []string{"uniform"}
 	durations := []int32{1000}
 
