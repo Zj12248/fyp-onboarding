@@ -9,20 +9,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	pb "fyp-onboarding/workerpb"
 
 	"google.golang.org/grpc"
 )
-
-// global mutex to enforce concurrency = 1
-var mu sync.Mutex
-
-// track active requests (should always be <= 1)
-var activeRequests int32
-var activeMu sync.Mutex
 
 type server struct {
 	pb.UnimplementedWorkerServiceServer
@@ -31,37 +23,18 @@ type server struct {
 func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkResponse, error) {
 	log.Printf("[Worker] Request received: DurationMs=%d, Timestamp=%s", req.DurationMs, time.Now().Format(time.RFC3339Nano))
 
-	// Track waiting for lock
-	log.Println("[Worker] Waiting for mutex lock...")
-	mu.Lock()
-	defer mu.Unlock()
-	log.Println("[Worker] Acquired mutex lock!")
-
-	// Increment active counter
-	activeMu.Lock()
-	activeRequests++
-	if activeRequests > 1 {
-		log.Printf("[ERROR] Concurrency >1! activeRequests=%d", activeRequests)
-	} else {
-		log.Printf("[Worker] Active requests=%d", activeRequests)
-	}
-	activeMu.Unlock()
-
 	start := time.Now()
 	duration := time.Duration(req.DurationMs) * time.Millisecond
 	end := time.Now().Add(duration)
-
-	timeout := duration * 5
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
 	var count uint64
 	val := 1.0
 
 	stopCh := make(chan struct{})
 	freqSamples := make([]int64, 0)
-	sampleInterval := 100 * time.Millisecond
+	sampleInterval := 200 * time.Millisecond // cpu sampling rate
 
+	// Start CPU frequency sampler
 	go func() {
 		ticker := time.NewTicker(sampleInterval)
 		defer ticker.Stop()
@@ -73,36 +46,29 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 				}
 			case <-stopCh:
 				return
-			case <-ctx.Done():
+			case <-ctx.Done(): // cancel if client disconnects
 				return
 			}
 		}
 	}()
 
-	status := "done"
-
-loop:
-	for {
-		select {
-		case <-ctx.Done():
-			status = "timeout"
-			break loop
-		default:
-			if time.Now().After(end) {
-				break loop
-			}
-			val = val*1.0001 + 0.9999
-			val = math.Sin(val) + math.Sqrt(val)
-			val = math.Log(val + 1.0)
-			count++
-			if val > 1e6 {
-				val = math.Mod(val, 99999)
-			}
+	// Busy spin loop for requested duration
+	for time.Now().Before(end) {
+		val = val*1.0001 + 0.9999
+		val = math.Sin(val) + math.Sqrt(val)
+		val = math.Log(val+1.0) + math.Tan(val) + math.Exp(val)
+		val = math.Atan(val) + math.Cosh(val) + math.Sinh(val)
+		count++
+		if val > 1e6 {
+			val = math.Mod(val, 99999)
 		}
 	}
 
+	status := "done"
+
 	close(stopCh)
 
+	// Compute average CPU frequency
 	var avgFreq int64
 	if len(freqSamples) > 0 {
 		var sum int64
@@ -118,12 +84,6 @@ loop:
 		req.DurationMs, e2e, count, avgFreq, status)
 	fmt.Printf("[Worker CLI] Request finished: DurationMs=%d, E2E=%d ms, Iterations=%d, AvgCPUFreq=%d kHz, Status=%s\n",
 		req.DurationMs, e2e, count, avgFreq, status)
-
-	// Decrement active counter
-	activeMu.Lock()
-	activeRequests--
-	activeMu.Unlock()
-	log.Println("[Worker] Released mutex lock!")
 
 	return &pb.WorkResponse{
 		Status:        status,

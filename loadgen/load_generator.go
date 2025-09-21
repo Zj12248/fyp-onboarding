@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -18,7 +19,7 @@ import (
 type batchResult struct {
 	workerE2E     int64
 	clientE2E     int64
-	avgCpuFreqKhz int64 // store CPU freq from worker response
+	avgCpuFreqKhz int64
 }
 
 func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, distribution string) {
@@ -46,7 +47,9 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 		defer ticker.Stop()
 	}
 
-	reqCount := 0
+	reqCount := int64(0)
+	timeoutCount := int64(0)
+
 	batchResults := []batchResult{}
 	var batchMutex sync.Mutex
 
@@ -74,7 +77,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 					avgFreq := float64(sumFreq) / float64(len(batchResults))
 					logger.Printf("30s Batch Avg (last %d reqs): WorkerE2E=%.2f ms, ClientE2E=%.2f ms, AvgCPUFreq=%.2f kHz",
 						len(batchResults), avgWorker, avgClient, avgFreq)
-					batchResults = []batchResult{} // reset for next interval
+					batchResults = []batchResult{} // reset
 				}
 				batchMutex.Unlock()
 			case <-done:
@@ -95,7 +98,6 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 			time.Sleep(delay)
 		}
 
-		// Send requests but discard results
 		go func() {
 			_, _ = client.DoWork(
 				context.Background(),
@@ -108,7 +110,17 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	fmt.Printf("Running experiment for %d minutes...\n", expMin)
 	expEnd := time.Now().Add(time.Duration(expMin) * time.Minute)
 
+	expCtx, expCancel := context.WithCancel(context.Background())
+	defer expCancel()
+
 	for time.Now().Before(expEnd) {
+		select {
+		case <-expCtx.Done():
+			fmt.Println("Experiment stopped early due to high timeout rate.")
+			break
+		default:
+		}
+
 		if distribution == "uniform" {
 			<-ticker.C
 		} else {
@@ -117,20 +129,36 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 			time.Sleep(delay)
 		}
 
-		reqCount++
+		newReqID := atomic.AddInt64(&reqCount, 1)
 		wg.Add(1)
 
-		go func(idx int) {
+		go func(idx int64) {
 			defer wg.Done()
 			start := time.Now()
+
+			// Timeout = 10x requested spin duration
+			timeout := time.Duration(durationMs) * 10 * time.Millisecond
+			ctx, cancel := context.WithTimeout(expCtx, timeout)
+			defer cancel()
+
 			resp, err := client.DoWork(
-				context.Background(),
+				ctx, // for timeout
 				&pb.WorkRequest{DurationMs: durationMs},
 			)
 			e2e := time.Since(start).Milliseconds()
 
 			if err != nil {
 				logger.Printf("Error (req %d): %v", idx, err)
+				if ctx.Err() == context.DeadlineExceeded { //if timeout
+					atomic.AddInt64(&timeoutCount, 1)
+				}
+				// Check threshold (10% timeout)
+				total := atomic.LoadInt64(&reqCount)
+				timeouts := atomic.LoadInt64(&timeoutCount)
+				if total > 50 && float64(timeouts)/float64(total) > 0.10 {
+					logger.Printf("Timeout rate exceeded 10%% (timeouts=%d, total=%d). Stopping experiment.", timeouts, total)
+					expCancel()
+				}
 				return
 			}
 
@@ -142,7 +170,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 				avgCpuFreqKhz: resp.AvgCpuFreqKhz,
 			})
 			batchMutex.Unlock()
-		}(reqCount)
+		}(newReqID)
 	}
 
 	wg.Wait()
@@ -165,13 +193,13 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	}
 	batchMutex.Unlock()
 
-	logger.Printf("Finished experiment: RPS=%d, Duration=%dms, Dist=%s, TotalReq=%d",
-		rps, durationMs, distribution, reqCount)
+	total := atomic.LoadInt64(&reqCount)
+	timeouts := atomic.LoadInt64(&timeoutCount)
+	logger.Printf("Finished experiment: RPS=%d, Duration=%dms, Dist=%s, TotalReq=%d, Timeouts=%d (%.2f%%)",
+		rps, durationMs, distribution, total, timeouts, 100*float64(timeouts)/float64(total))
 }
 
 func main() {
-	// Command-line flag for worker host:port
-	// configure port through CLI ( go run ./loadgen/load_generator.go --worker=localhost:8080 )
 	fmt.Printf("Loadgen Script running\n")
 	workerAddr := flag.String("worker", "localhost:50051", "Worker gRPC host:port")
 	flag.Parse()
@@ -181,10 +209,8 @@ func main() {
 	defer f.Close()
 	log.SetOutput(f)
 
-	// Print connection attempt
 	fmt.Printf("Connecting to worker at %s...\n", *workerAddr)
 
-	// Connect to Worker
 	conn, err := grpc.Dial(
 		*workerAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -198,13 +224,12 @@ func main() {
 	fmt.Printf("Connection Successful\n")
 	client := pb.NewWorkerServiceClient(conn)
 
-	// Sweep parameters(reduced for testing)
-	rpsValues := []int{6}                //, 15, 20, 25, 30, 35, 40, 45, 50}
-	distributions := []string{"uniform"} // , "poisson"}
-	durations := []int32{1000}           // 300, 400, 500, 600, 700, 800, 900, 1000
+	// Sweep parameters (reduced for testing)
+	rpsValues := []int{5, 20, 50}
+	distributions := []string{"uniform"}
+	durations := []int32{100, 1000}
 
 	fmt.Printf("Performing Grid Search\n")
-	// Full grid search
 	for _, rps := range rpsValues {
 		for _, dist := range distributions {
 			for _, dur := range durations {
