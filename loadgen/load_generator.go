@@ -25,6 +25,9 @@ type batchResult struct {
 
 func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, distribution string) {
 	fmt.Printf("Running Experiment with RPS=%d, DUR=%d\n", rps, durationMs)
+
+	runStart := time.Now() // Track experiment start time
+
 	runID := fmt.Sprintf("RPS%d_Dur%d_%s_%s",
 		rps, durationMs, distribution, time.Now().Format("150405"))
 	logFile := fmt.Sprintf("logs/%s.log", runID)
@@ -143,10 +146,6 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 				return
 			}
 
-			//TODO
-			fmt.Printf("DEBUG LoadGen response struct: %+v\n", resp)
-			fmt.Printf("DEBUG Iterations field: %d\n", resp.Iterations)
-
 			batchMutex.Lock()
 			batchResults = append(batchResults, batchResult{
 				workerE2E:     resp.E2ELatencyMs,
@@ -186,9 +185,12 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	if total > 0 {
 		timeoutRate = 100 * float64(timeouts) / float64(total)
 	}
-	logger.Printf("Finished experiment: RPS=%d, Duration=%dms, Dist=%s, TotalReq=%d, Timeouts=%d (%.2f%%)",
-		rps, durationMs, distribution, total, timeouts, timeoutRate)
+
+	runDuration := time.Since(runStart) // Compute total experiment duration
+	logger.Printf("Finished experiment: RPS=%d, Duration=%dms, Dist=%s, TotalReq=%d, Timeouts=%d (%.2f%%), RunTime=%s",
+		rps, durationMs, distribution, total, timeouts, timeoutRate, runDuration)
 	fmt.Printf("Timeout rate for this run: %.2f%%\n", timeoutRate)
+	fmt.Printf("Total run duration: %s\n", runDuration)
 }
 
 func main() {
