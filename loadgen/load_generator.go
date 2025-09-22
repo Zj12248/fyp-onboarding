@@ -143,6 +143,9 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 				return
 			}
 
+			fmt.Printf("[LoadGen] Got response: DurationMs=%d, E2ELatencyMs=%d, Iterations=%d, AvgCPUFreq=%d kHz, Status=%s\n",
+				durationMs, resp.E2ELatencyMs, resp.Iterations, resp.AvgCpuFreqKhz, resp.Status)
+
 			batchMutex.Lock()
 			batchResults = append(batchResults, batchResult{
 				workerE2E:     resp.E2ELatencyMs,
