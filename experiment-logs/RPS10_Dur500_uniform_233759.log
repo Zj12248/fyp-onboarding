@@ -1,0 +1,11 @@
+2025/09/21 23:39:19 20s Batch Avg (last 194 reqs): WorkerE2E=500.00 ms, ClientE2E=503.91 ms, AvgCPUFreq=0.00 kHz, AvgIterations=3453982
+2025/09/21 23:39:39 20s Batch Avg (last 200 reqs): WorkerE2E=500.00 ms, ClientE2E=503.88 ms, AvgCPUFreq=0.00 kHz, AvgIterations=3457983
+2025/09/21 23:39:59 20s Batch Avg (last 200 reqs): WorkerE2E=500.00 ms, ClientE2E=503.86 ms, AvgCPUFreq=0.00 kHz, AvgIterations=3450295
+2025/09/21 23:40:19 20s Batch Avg (last 200 reqs): WorkerE2E=500.00 ms, ClientE2E=503.88 ms, AvgCPUFreq=0.00 kHz, AvgIterations=3451993
+2025/09/21 23:40:39 20s Batch Avg (last 200 reqs): WorkerE2E=500.00 ms, ClientE2E=503.75 ms, AvgCPUFreq=0.00 kHz, AvgIterations=3450667
+2025/09/21 23:40:59 20s Batch Avg (last 200 reqs): WorkerE2E=500.00 ms, ClientE2E=503.77 ms, AvgCPUFreq=0.00 kHz, AvgIterations=3451294
+2025/09/21 23:41:19 20s Batch Avg (last 200 reqs): WorkerE2E=500.00 ms, ClientE2E=503.74 ms, AvgCPUFreq=0.00 kHz, AvgIterations=3448422
+2025/09/21 23:41:39 20s Batch Avg (last 200 reqs): WorkerE2E=500.00 ms, ClientE2E=503.88 ms, AvgCPUFreq=0.00 kHz, AvgIterations=3454891
+2025/09/21 23:41:59 20s Batch Avg (last 200 reqs): WorkerE2E=500.00 ms, ClientE2E=503.75 ms, AvgCPUFreq=0.00 kHz, AvgIterations=3453564
+2025/09/21 23:41:59 Final Batch Avg (last 6 reqs): WorkerE2E=500.00 ms, ClientE2E=503.67 ms, AvgCPUFreq=0.00 kHz, AvgIterations=3447893
+2025/09/21 23:41:59 Finished experiment: RPS=10, Duration=500ms, Dist=uniform, TotalReq=1800, Timeouts=0 (0.00%), RunTime=4m0.504893994s
