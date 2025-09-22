@@ -14,7 +14,7 @@ message WorkResponse {
   string status = 1;
   int64 e2e_latency_ms = 2;
   int64 avg_cpu_freq_khz = 3; // Average CPU frequency (in kHz)
-  uint64 iterations = 4; // number of busy-spin loops iterated
+  int64 iterations = 4; // number of busy-spin loops iterated
 }
 
 // Service definition

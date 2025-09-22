@@ -20,7 +20,7 @@ type batchResult struct {
 	workerE2E     int64
 	clientE2E     int64
 	avgCpuFreqKhz int64
-	iterations    uint64
+	iterations    int64
 }
 
 func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, distribution string) {
@@ -63,8 +63,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 			case <-batchTicker.C:
 				batchMutex.Lock()
 				if len(batchResults) > 0 {
-					var sumWorker, sumClient, sumFreq int64
-					var sumIter uint64
+					var sumWorker, sumClient, sumFreq, sumIter int64
 					for _, r := range batchResults {
 						sumWorker += r.workerE2E
 						sumClient += r.clientE2E
@@ -131,7 +130,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 			resp, err := client.DoWork(ctx, &pb.WorkRequest{DurationMs: durationMs})
 			e2e := time.Since(start).Milliseconds()
 
-			if err != nil {
+			if err != nil { // timeout logic
 				if ctx.Err() == context.DeadlineExceeded {
 					atomic.AddInt64(&timeoutCount, 1)
 				}
@@ -161,8 +160,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	// Log remaining batch
 	batchMutex.Lock()
 	if len(batchResults) > 0 {
-		var sumWorker, sumClient, sumFreq int64
-		var sumIter uint64
+		var sumWorker, sumClient, sumFreq, sumIter int64
 		for _, r := range batchResults {
 			sumWorker += r.workerE2E
 			sumClient += r.clientE2E
@@ -210,7 +208,7 @@ func main() {
 	fmt.Printf("Connection Successful\n")
 	client := pb.NewWorkerServiceClient(conn)
 
-	rpsValues := []int{15}
+	rpsValues := []int{15, 25}
 	distributions := []string{"uniform"}
 	durations := []int32{1000}
 

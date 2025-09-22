@@ -72,7 +72,7 @@ type WorkResponse struct {
 	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	E2ELatencyMs  int64                  `protobuf:"varint,2,opt,name=e2e_latency_ms,json=e2eLatencyMs,proto3" json:"e2e_latency_ms,omitempty"`
 	AvgCpuFreqKhz int64                  `protobuf:"varint,3,opt,name=avg_cpu_freq_khz,json=avgCpuFreqKhz,proto3" json:"avg_cpu_freq_khz,omitempty"` // Average CPU frequency (in kHz)
-	Iterations    uint64                 `protobuf:"varint,4,opt,name=iterations,proto3" json:"iterations,omitempty"`                                // number of busy-spin loops iterated
+	Iterations    int64                  `protobuf:"varint,4,opt,name=iterations,proto3" json:"iterations,omitempty"`                                // number of busy-spin loops iterated
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -128,7 +128,7 @@ func (x *WorkResponse) GetAvgCpuFreqKhz() int64 {
 	return 0
 }
 
-func (x *WorkResponse) GetIterations() uint64 {
+func (x *WorkResponse) GetIterations() int64 {
 	if x != nil {
 		return x.Iterations
 	}
@@ -148,7 +148,7 @@ const file_worker_proto_rawDesc = "" +
 	"\x0ee2e_latency_ms\x18\x02 \x01(\x03R\fe2eLatencyMs\x12'\n" +
 	"\x10avg_cpu_freq_khz\x18\x03 \x01(\x03R\ravgCpuFreqKhz\x12\x1e\n" +
 	"\n" +
-	"iterations\x18\x04 \x01(\x04R\n" +
+	"iterations\x18\x04 \x01(\x03R\n" +
 	"iterations2D\n" +
 	"\rWorkerService\x123\n" +
 	"\x06DoWork\x12\x13.worker.WorkRequest\x1a\x14.worker.WorkResponseB\x15Z\x13./workerpb;workerpbb\x06proto3"

@@ -27,7 +27,7 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	duration := time.Duration(req.DurationMs) * time.Millisecond
 	end := time.Now().Add(duration)
 
-	var count uint64
+	var count int64
 	val := 1.0
 
 	stopCh := make(chan struct{})
