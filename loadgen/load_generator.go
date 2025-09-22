@@ -211,7 +211,7 @@ func main() {
 	fmt.Printf("Connection Successful\n")
 	client := pb.NewWorkerServiceClient(conn)
 
-	rpsValues := []int{15, 25}
+	rpsValues := []int{20}
 	distributions := []string{"uniform"}
 	durations := []int32{1000}
 
