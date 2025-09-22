@@ -32,7 +32,7 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 
 	stopCh := make(chan struct{})
 	freqSamples := make([]int64, 0)
-	sampleInterval := 200 * time.Millisecond // cpu sampling rate
+	sampleInterval := 1000 * time.Millisecond // cpu sampling rate
 
 	// Start CPU frequency sampler
 	go func() {
