@@ -40,8 +40,8 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	defer f.Close()
 	logger := log.New(f, "", log.LstdFlags)
 
-	warmupMin := 1
-	expMin := 3
+	warmupMin := 0
+	expMin := 1
 
 	var wg sync.WaitGroup
 	var ticker *time.Ticker
@@ -214,9 +214,9 @@ func main() {
 	fmt.Printf("Connection Successful\n")
 	client := pb.NewWorkerServiceClient(conn)
 
-	rpsValues := []int{10, 15, 20, 25, 30, 35, 40}
+	rpsValues := []int{15} // {15, 20, 25, 30, 35, 40}
 	distributions := []string{"uniform"}
-	durations := []int32{100, 300, 500, 700, 800, 900, 1000}
+	durations := []int32{300} // {300, 400, 500, 600, 700, 800, 900, 1000}
 
 	fmt.Printf("Performing Grid Search\n")
 	for _, rps := range rpsValues {
