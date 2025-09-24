@@ -32,7 +32,7 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 
 	stopCh := make(chan struct{})
 	freqSamples := make([]int64, 0)
-	sampleInterval := 1000 * time.Millisecond // cpu sampling rate
+	sampleInterval := 100 * time.Millisecond // cpu sampling rate
 
 	// Start CPU frequency sampler
 	go func() {
@@ -94,14 +94,36 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 	}, nil
 }
 
-// Helper: read current CPU frequency (core 0)
 func getCPUFreq() (int64, error) {
-	data, err := os.ReadFile("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
-	if err != nil {
-		return 0, err
+	const numCores = 20
+	var sum int64
+	var valid int64
+
+	for i := range numCores {
+		path := fmt.Sprintf("/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq", i)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			log.Printf("[Worker] Failed to read CPU%d freq: %v", i, err)
+			continue
+		}
+
+		val := strings.TrimSpace(string(data))
+		freq, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			log.Printf("[Worker] Failed to parse CPU%d freq (%q): %v", i, val, err)
+			continue
+		}
+
+		sum += freq
+		valid++
 	}
-	val := strings.TrimSpace(string(data))
-	return strconv.ParseInt(val, 10, 64)
+
+	if valid == 0 {
+		return 0, fmt.Errorf("no CPU frequencies could be read")
+	}
+
+	avg := sum / valid
+	return avg, nil
 }
 
 func main() {
