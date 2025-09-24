@@ -1,0 +1,2 @@
+2025/09/24 11:25:07 Final Batch Avg (last 1 reqs): WorkerE2E=800.00 ms, ClientE2E=804.00 ms, AvgCPUFreq=2200020.00 kHz, AvgIterations=5657878
+2025/09/24 11:25:07 Finished experiment: RPS=30, Duration=800ms, Dist=uniform, TotalReq=536, Timeouts=54 (10.07%), RunTime=1m17.867965286s
