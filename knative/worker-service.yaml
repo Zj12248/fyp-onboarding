@@ -7,31 +7,16 @@ spec:
   template:
     metadata:
       annotations:
-        autoscaling.knative.dev/minScale: "1"   # at least 1 pod
+        autoscaling.knative.dev/minScale: "1"
     spec:
-      containerConcurrency: 1                   # 1 request per pod
+      containerConcurrency: 1
       containers:
       - image: zj3214/worker:latest
         ports:
           - containerPort: 50051
             name: h2c
-          - containerPort: 9090
-            name: metrics
         resources:
           requests:
             cpu: "1"
           limits:
             cpu: "1"
-        # Optional probes
-        readinessProbe:
-          httpGet:
-            path: /metrics
-            port: 9090
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        livenessProbe:
-          httpGet:
-            path: /metrics
-            port: 9090
-          initialDelaySeconds: 10
-          periodSeconds: 20
