@@ -11,12 +11,27 @@ spec:
     spec:
       containerConcurrency: 1                   # 1 request per pod
       containers:
-        - image: zj3214/worker:latest
-          ports:
-            - containerPort: 50051
-              name: h2c
-          resources:
-            requests:
-              cpu: "1"                          # request 1 CPU core
-            limits:
-              cpu: "1"                          # limit to 1 CPU core
+      - image: zj3214/worker:latest
+        ports:
+          - containerPort: 50051
+            name: h2c
+          - containerPort: 9090
+            name: metrics
+        resources:
+          requests:
+            cpu: "1"
+          limits:
+            cpu: "1"
+        # Optional probes
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 9090
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9090
+          initialDelaySeconds: 10
+          periodSeconds: 20

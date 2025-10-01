@@ -6,7 +6,7 @@ import (
 	"fmt"
 	pb "fyp-onboarding/workerpb"
 	"log"
-	"math/rand/v2"
+	"math/rand"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -14,8 +14,22 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"net/http"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// ---------------- Prometheus Metric ----------------
+var totalRequests = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "loadgen_total_requests",
+		Help: "Total number of requests sent by loadgen",
+	},
+)
+
+// ---------------- Batch Result Struct ----------------
 type batchResult struct {
 	workerE2E     int64
 	clientE2E     int64
@@ -23,15 +37,16 @@ type batchResult struct {
 	iterations    int64
 }
 
+const WARMUPMIN = 1
+const EXPMIN = 2
+
+// ---------------- Experiment Runner ----------------
 func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, distribution string) {
 	fmt.Printf("Running Experiment with RPS=%d, DUR=%d\n", rps, durationMs)
 
-	runStart := time.Now() // Track experiment start time
-
-	runID := fmt.Sprintf("RPS%d_Dur%d_%s_%s",
-		rps, durationMs, distribution, time.Now().Format("150405"))
+	runStart := time.Now()
+	runID := fmt.Sprintf("RPS%d_Dur%d_%s_%s", rps, durationMs, distribution, time.Now().Format("150405"))
 	logFile := fmt.Sprintf("logs/%s.log", runID)
-
 	os.MkdirAll("logs", os.ModePerm)
 	f, err := os.Create(logFile)
 	if err != nil {
@@ -39,9 +54,6 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	}
 	defer f.Close()
 	logger := log.New(f, "", log.LstdFlags)
-
-	warmupMin := 1
-	expMin := 3
 
 	var wg sync.WaitGroup
 	var ticker *time.Ticker
@@ -89,8 +101,8 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	}()
 
 	// --- Warmup Phase ---
-	fmt.Printf("Warmup for %d minutes (discarding results)...\n", warmupMin)
-	warmupEnd := time.Now().Add(time.Duration(warmupMin) * time.Minute)
+	fmt.Printf("Warmup for %d minutes (discarding results)...\n", WARMUPMIN)
+	warmupEnd := time.Now().Add(time.Duration(WARMUPMIN) * time.Minute)
 	for time.Now().Before(warmupEnd) {
 		if distribution == "uniform" {
 			<-ticker.C
@@ -104,8 +116,8 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	}
 
 	// --- Experiment Phase ---
-	fmt.Printf("Running experiment for %d minutes...\n", expMin)
-	expEnd := time.Now().Add(time.Duration(expMin) * time.Minute)
+	fmt.Printf("Running experiment for %d minutes...\n", EXPMIN)
+	expEnd := time.Now().Add(time.Duration(EXPMIN) * time.Minute)
 	expCtx, expCancel := context.WithCancel(context.Background())
 	defer expCancel()
 
@@ -120,8 +132,9 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 		}
 
 		newReqID := atomic.AddInt64(&reqCount, 1)
-		wg.Add(1)
+		totalRequests.Inc() // Prometheus metric
 
+		wg.Add(1)
 		go func(idx int64) {
 			defer wg.Done()
 			start := time.Now()
@@ -133,7 +146,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 			resp, err := client.DoWork(ctx, &pb.WorkRequest{DurationMs: durationMs})
 			e2e := time.Since(start).Milliseconds()
 
-			if err != nil { // timeout logic
+			if err != nil {
 				if ctx.Err() == context.DeadlineExceeded {
 					atomic.AddInt64(&timeoutCount, 1)
 				}
@@ -160,7 +173,7 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 	wg.Wait()
 	close(done)
 
-	// Log remaining batch
+	// Log final batch
 	batchMutex.Lock()
 	if len(batchResults) > 0 {
 		var sumWorker, sumClient, sumFreq, sumIter int64
@@ -186,44 +199,53 @@ func RunExperiment(client pb.WorkerServiceClient, rps int, durationMs int32, dis
 		timeoutRate = 100 * float64(timeouts) / float64(total)
 	}
 
-	runDuration := time.Since(runStart) // Compute total experiment duration
+	runDuration := time.Since(runStart)
 	logger.Printf("Finished experiment: RPS=%d, Duration=%dms, Dist=%s, TotalReq=%d, Timeouts=%d (%.2f%%), RunTime=%s",
 		rps, durationMs, distribution, total, timeouts, timeoutRate, runDuration)
-	fmt.Printf("Timeout rate for this run: %.2f%%\n", timeoutRate)
-	fmt.Printf("Total run duration: %s\n", runDuration)
+	fmt.Printf("Timeout rate: %.2f%%, Total run duration: %s\n", timeoutRate, runDuration)
 }
 
+// ---------------- Main Function ----------------
 func main() {
-	fmt.Printf("Loadgen Script running\n")
+	fmt.Println("Loadgen Script running")
+
 	workerAddr := flag.String("worker", "localhost:50051", "Worker gRPC host:port")
 	flag.Parse()
 
+	// Logging
 	f, _ := os.Create("load.log")
 	defer f.Close()
 	log.SetOutput(f)
 
-	fmt.Printf("Connecting to worker at %s...\n", *workerAddr)
+	// Start Prometheus metrics server
+	prometheus.MustRegister(totalRequests)
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		fmt.Println("Prometheus metrics available at :9090/metrics")
+		http.ListenAndServe(":9090", nil)
+	}()
 
+	// Connect to gRPC worker
+	fmt.Printf("Connecting to worker at %s...\n", *workerAddr)
 	conn, err := grpc.Dial(*workerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		fmt.Printf("Failed to connect: %v\n", err)
-		log.Fatalf("did not connect: %v", err)
+		log.Fatalf("Failed to connect: %v", err)
 	}
 	defer conn.Close()
-
-	fmt.Printf("Connection Successful\n")
 	client := pb.NewWorkerServiceClient(conn)
+	fmt.Println("Connection successful")
 
-	rpsValues := []int{15, 20, 25, 30, 35, 40}
+	// Grid search values
+	rpsValues := []int{20} //{15, 20, 25, 30, 35, 40}
 	distributions := []string{"uniform"}
-	durations := []int32{300, 400, 500, 600, 700, 800, 900, 1000}
+	durations := []int32{910} //{300, 400, 500, 600, 700, 800, 900, 1000}
 
-	fmt.Printf("Performing Grid Search\n")
+	fmt.Println("Performing Grid Search")
 	for _, rps := range rpsValues {
 		for _, dist := range distributions {
 			for _, dur := range durations {
 				RunExperiment(client, rps, dur, dist)
-				time.Sleep(25 * time.Second) // sleep between grid search runs
+				time.Sleep(5 * time.Second) // sleep between runs
 			}
 		}
 	}

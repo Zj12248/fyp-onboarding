@@ -31,7 +31,7 @@ WORKDIR /root/
 COPY --from=builder /app/bin/worker .
 
 # Expose gRPC port
-EXPOSE 50051
+EXPOSE 50051 9090
 
 # Run the worker binary
 CMD ["./worker"]
