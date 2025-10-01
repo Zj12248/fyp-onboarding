@@ -221,7 +221,7 @@ func main() {
 	prometheus.MustRegister(totalRequests)
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
-		fmt.Println("Prometheus metrics available at :9090/metrics")
+		fmt.Println("Inactive! -- Prometheus metrics")
 		http.ListenAndServe(":9090", nil)
 	}()
 
@@ -236,9 +236,9 @@ func main() {
 	fmt.Println("Connection successful")
 
 	// Grid search values
-	rpsValues := []int{20} //{15, 20, 25, 30, 35, 40}
+	rpsValues := []int{10, 20, 30} //{15, 20, 25, 30, 35, 40}
 	distributions := []string{"uniform"}
-	durations := []int32{910} //{300, 400, 500, 600, 700, 800, 900, 1000}
+	durations := []int32{600, 900} //{300, 400, 500, 600, 700, 800, 900, 1000}
 
 	fmt.Println("Performing Grid Search")
 	for _, rps := range rpsValues {
