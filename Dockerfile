@@ -11,7 +11,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Then copy the source code
-# ! Best practice for docker thus no need to rebuild above layer. Layering optimisation.
 COPY . .
 
 # Build the Go binary (worker only)
@@ -24,8 +23,11 @@ FROM ubuntu:22.04
 
 WORKDIR /root/
 
-# Install necessary libraries (e.g., ca-certificates)
-# RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+# --- CRITICAL FIX START ---
+# Firecracker-containerd fails if the image has NO environment variables.
+# We add a dummy variable to ensure the list is populated.
+ENV WORKER_TYPE=firecracker
+# --- CRITICAL FIX END ---
 
 # Copy only the binary from the builder stage to root
 COPY --from=builder /app/bin/worker .
@@ -33,5 +35,5 @@ COPY --from=builder /app/bin/worker .
 # Expose gRPC port
 EXPOSE 50051 9090
 
-# Run the worker binary
-CMD ["./worker"]
+# Run the worker binary (Absolute path is safer for Firecracker)
+CMD ["/root/worker"]
