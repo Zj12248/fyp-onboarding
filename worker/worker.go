@@ -21,7 +21,12 @@ type server struct {
 }
 
 func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkResponse, error) {
-	log.Printf("[Worker] Request received: DurationMs=%d, Timestamp=%s", req.DurationMs, time.Now().Format(time.RFC3339Nano))
+	// Capture arrival timestamp immediately for data plane latency analysis
+	arrivalTime := time.Now()
+	arrivalNs := arrivalTime.UnixNano()
+
+	log.Printf("[Worker] Request received: DurationMs=%d, WorkMode=%s, Timestamp=%s",
+		req.DurationMs, req.WorkMode, arrivalTime.Format(time.RFC3339Nano))
 
 	start := time.Now()
 	duration := time.Duration(req.DurationMs) * time.Millisecond
@@ -29,6 +34,16 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 
 	var count int64
 	val := 1.0
+
+	// Capture timestamp before busy work
+	preBusyTime := time.Now()
+	preBusyNs := preBusyTime.UnixNano()
+
+	// Determine work mode (default to "full" for backward compatibility)
+	workMode := req.WorkMode
+	if workMode == "" {
+		workMode = "full"
+	}
 
 	stopCh := make(chan struct{})
 	freqSamples := make([]int64, 0)
@@ -52,17 +67,27 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 		}
 	}()
 
-	// Busy spin loop for requested duration
-	for time.Now().Before(end) {
-		val = val*1.0001 + 0.9999
-		val = math.Sin(val) + math.Sqrt(val)
-		val = math.Log(val+1.0) + math.Tan(val) + math.Exp(val)
-		val = math.Atan(val) + math.Cosh(val) + math.Sinh(val)
-		count++
-		if val > 1e6 {
-			val = math.Mod(val, 99999)
+	// Busy spin loop for requested duration (skip if echo mode)
+	if workMode == "echo" {
+		// Echo mode: No busy work, just timestamps
+		log.Printf("[Worker] Echo mode - skipping busy work")
+	} else {
+		// Full mode: Complete CPU-intensive work
+		for time.Now().Before(end) {
+			val = val*1.0001 + 0.9999
+			val = math.Sin(val) + math.Sqrt(val)
+			val = math.Log(val+1.0) + math.Tan(val) + math.Exp(val)
+			val = math.Atan(val) + math.Cosh(val) + math.Sinh(val)
+			count++
+			if val > 1e6 {
+				val = math.Mod(val, 99999)
+			}
 		}
 	}
+
+	// Capture timestamp after busy work
+	postBusyTime := time.Now()
+	postBusyNs := postBusyTime.UnixNano()
 
 	status := "done"
 
@@ -78,19 +103,32 @@ func (s *server) DoWork(ctx context.Context, req *pb.WorkRequest) (*pb.WorkRespo
 		avgFreq = sum / int64(len(freqSamples))
 	}
 
+	// Capture response timestamp
+	responseTime := time.Now()
+	responseNs := responseTime.UnixNano()
+
 	e2e := time.Since(start).Milliseconds()
+	workerProcessingNs := postBusyNs - preBusyNs
+	workerProcessingMs := float64(workerProcessingNs) / 1e6
+	totalLatencyNs := responseNs - arrivalNs
+	totalLatencyMs := float64(totalLatencyNs) / 1e6
 
-	log.Printf("[Worker] Finished request: DurationMs=%d, E2ELatencyMs=%d, Iterations=%d, AvgCPUFreq=%d kHz, Status=%s",
-		req.DurationMs, e2e, count, avgFreq, status)
-	fmt.Printf("[Worker CLI] Request finished: DurationMs=%d, E2E=%d ms, Iterations=%d, AvgCPUFreq=%d kHz, Status=%s\n",
-		req.DurationMs, e2e, count, avgFreq, status)
+	log.Printf("[Worker] Finished request: WorkMode=%s, DurationMs=%d, E2ELatencyMs=%d, TotalLatency=%.3fms, WorkerProcessing=%.3fms, Iterations=%d, AvgCPUFreq=%d kHz, Status=%s",
+		workMode, req.DurationMs, e2e, totalLatencyMs, workerProcessingMs, count, avgFreq, status)
+	fmt.Printf("[Worker CLI] Request finished: WorkMode=%s, DurationMs=%d, E2E=%d ms, TotalLatency=%.3fms, Processing=%.3fms, Iterations=%d, AvgCPUFreq=%d kHz, Status=%s\n",
+		workMode, req.DurationMs, e2e, totalLatencyMs, workerProcessingMs, count, avgFreq, status)
 
-	// Return count as part of response
+	// Return comprehensive response with high-precision timestamps
 	return &pb.WorkResponse{
-		Status:        status,
-		E2ELatencyMs:  e2e,
-		AvgCpuFreqKhz: avgFreq,
-		Iterations:    count,
+		Status:              status,
+		E2ELatencyMs:        e2e,
+		AvgCpuFreqKhz:       avgFreq,
+		Iterations:          count,
+		ArrivalTimestampNs:  arrivalNs,
+		PreBusyTimestampNs:  preBusyNs,
+		PostBusyTimestampNs: postBusyNs,
+		ResponseTimestampNs: responseNs,
+		WorkerProcessingNs:  workerProcessingNs,
 	}, nil
 }
 

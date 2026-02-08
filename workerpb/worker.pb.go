@@ -25,6 +25,7 @@ const (
 type WorkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DurationMs    int32                  `protobuf:"varint,1,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"` // CPU spin duration in milliseconds
+	WorkMode      string                 `protobuf:"bytes,2,opt,name=work_mode,json=workMode,proto3" json:"work_mode,omitempty"`        // Work mode: "full" (default) or "echo"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -66,6 +67,13 @@ func (x *WorkRequest) GetDurationMs() int32 {
 	return 0
 }
 
+func (x *WorkRequest) GetWorkMode() string {
+	if x != nil {
+		return x.WorkMode
+	}
+	return ""
+}
+
 // Response from Worker
 type WorkResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -73,8 +81,14 @@ type WorkResponse struct {
 	E2ELatencyMs  int64                  `protobuf:"varint,2,opt,name=e2e_latency_ms,json=e2eLatencyMs,proto3" json:"e2e_latency_ms,omitempty"`
 	AvgCpuFreqKhz int64                  `protobuf:"varint,3,opt,name=avg_cpu_freq_khz,json=avgCpuFreqKhz,proto3" json:"avg_cpu_freq_khz,omitempty"` // Average CPU frequency (in kHz)
 	Iterations    int64                  `protobuf:"varint,4,opt,name=iterations,proto3" json:"iterations,omitempty"`                                // number of busy-spin loops iterated
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// High-precision timestamps for data plane latency analysis
+	ArrivalTimestampNs  int64 `protobuf:"varint,5,opt,name=arrival_timestamp_ns,json=arrivalTimestampNs,proto3" json:"arrival_timestamp_ns,omitempty"`      // Request arrival time (nanoseconds since epoch)
+	PreBusyTimestampNs  int64 `protobuf:"varint,6,opt,name=pre_busy_timestamp_ns,json=preBusyTimestampNs,proto3" json:"pre_busy_timestamp_ns,omitempty"`    // Time before busy work starts
+	PostBusyTimestampNs int64 `protobuf:"varint,7,opt,name=post_busy_timestamp_ns,json=postBusyTimestampNs,proto3" json:"post_busy_timestamp_ns,omitempty"` // Time after busy work completes
+	ResponseTimestampNs int64 `protobuf:"varint,8,opt,name=response_timestamp_ns,json=responseTimestampNs,proto3" json:"response_timestamp_ns,omitempty"`   // Time when response is sent
+	WorkerProcessingNs  int64 `protobuf:"varint,9,opt,name=worker_processing_ns,json=workerProcessingNs,proto3" json:"worker_processing_ns,omitempty"`      // Total worker processing time (post_busy - pre_busy)
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *WorkResponse) Reset() {
@@ -135,21 +149,62 @@ func (x *WorkResponse) GetIterations() int64 {
 	return 0
 }
 
+func (x *WorkResponse) GetArrivalTimestampNs() int64 {
+	if x != nil {
+		return x.ArrivalTimestampNs
+	}
+	return 0
+}
+
+func (x *WorkResponse) GetPreBusyTimestampNs() int64 {
+	if x != nil {
+		return x.PreBusyTimestampNs
+	}
+	return 0
+}
+
+func (x *WorkResponse) GetPostBusyTimestampNs() int64 {
+	if x != nil {
+		return x.PostBusyTimestampNs
+	}
+	return 0
+}
+
+func (x *WorkResponse) GetResponseTimestampNs() int64 {
+	if x != nil {
+		return x.ResponseTimestampNs
+	}
+	return 0
+}
+
+func (x *WorkResponse) GetWorkerProcessingNs() int64 {
+	if x != nil {
+		return x.WorkerProcessingNs
+	}
+	return 0
+}
+
 var File_worker_proto protoreflect.FileDescriptor
 
 const file_worker_proto_rawDesc = "" +
 	"\n" +
-	"\fworker.proto\x12\x06worker\".\n" +
+	"\fworker.proto\x12\x06worker\"K\n" +
 	"\vWorkRequest\x12\x1f\n" +
 	"\vduration_ms\x18\x01 \x01(\x05R\n" +
-	"durationMs\"\x95\x01\n" +
+	"durationMs\x12\x1b\n" +
+	"\twork_mode\x18\x02 \x01(\tR\bworkMode\"\x95\x03\n" +
 	"\fWorkResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12$\n" +
 	"\x0ee2e_latency_ms\x18\x02 \x01(\x03R\fe2eLatencyMs\x12'\n" +
 	"\x10avg_cpu_freq_khz\x18\x03 \x01(\x03R\ravgCpuFreqKhz\x12\x1e\n" +
 	"\n" +
 	"iterations\x18\x04 \x01(\x03R\n" +
-	"iterations2D\n" +
+	"iterations\x120\n" +
+	"\x14arrival_timestamp_ns\x18\x05 \x01(\x03R\x12arrivalTimestampNs\x121\n" +
+	"\x15pre_busy_timestamp_ns\x18\x06 \x01(\x03R\x12preBusyTimestampNs\x123\n" +
+	"\x16post_busy_timestamp_ns\x18\a \x01(\x03R\x13postBusyTimestampNs\x122\n" +
+	"\x15response_timestamp_ns\x18\b \x01(\x03R\x13responseTimestampNs\x120\n" +
+	"\x14worker_processing_ns\x18\t \x01(\x03R\x12workerProcessingNs2D\n" +
 	"\rWorkerService\x123\n" +
 	"\x06DoWork\x12\x13.worker.WorkRequest\x1a\x14.worker.WorkResponseB\x15Z\x13./workerpb;workerpbb\x06proto3"
 
