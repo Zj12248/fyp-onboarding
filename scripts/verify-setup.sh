@@ -43,18 +43,22 @@ echo "  Kube-proxy pods: $PROXY_READY/$PROXY_PODS ready"
 echo ""
 
 # 3. Rule counts
-echo "[3] Kube-proxy Rules (checking first node):"
-FIRST_NODE=$(kubectl get nodes -o name | head -1 | cut -d'/' -f2)
-echo "  Node: $FIRST_NODE"
+echo "[3] Kube-proxy Rules (on current node):"
+echo "  Node: $(hostname)"
 
-# Use nicolaka/netshoot which has iptables/nft, and use host networking (profile=sysadmin)
+# Check rule count based on mode
 if [[ "$PROXY_MODE" == *"nftables"* ]]; then
-  echo "  Attempting to check nftables rules..."
-  # Note: This requires K8s 1.23+ for 'debug' with profiles
-  kubectl debug node/$FIRST_NODE -it --image=nicolaka/netshoot --profile=sysadmin -- sh -c "nft list ruleset 2>/dev/null | grep -c 'dummy-service'" 2>/dev/null || echo "  (Could not run privileged debug pod. Run manually on node: sudo nft list ruleset | grep dummy-service)"
+  echo -n "  Total nftables rules: "
+  sudo nft list ruleset 2>/dev/null | grep -c 'rule' || echo '0'
+  
+  echo -n "  Dummy service rules: "
+  sudo nft list ruleset 2>/dev/null | grep -c 'dummy-service' || echo '0'
 else
-  echo "  Attempting to check iptables rules..."
-  kubectl debug node/$FIRST_NODE -it --image=nicolaka/netshoot --profile=sysadmin -- sh -c "iptables -t nat -L KUBE-SERVICES 2>/dev/null | grep -c 'dummy-service'" 2>/dev/null || echo "  (Could not run privileged debug pod. Run manually on node: sudo iptables -t nat -L KUBE-SERVICES | grep dummy-service)"
+  echo -n "  Total iptables rules: "
+  sudo iptables-save 2>/dev/null | wc -l || echo '0'
+  
+  echo -n "  Dummy service rules: "
+  sudo iptables -t nat -L KUBE-SERVICES 2>/dev/null | grep -c 'dummy-service' || echo '0'
 fi
 echo ""
 
@@ -88,8 +92,10 @@ if [ -n "$WORKER_POD" ]; then
   
   if [ "$POD_STATUS" = "Running" ]; then
     WORKER_IP=$(kubectl get pod "$POD_NAME" -n default -o jsonpath='{.status.podIP}' 2>/dev/null)
+    WORKER_CLUSTER_IP=$(kubectl get svc worker -n default -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
     echo "  Pod IP: $WORKER_IP"
-    echo "  Service DNS: worker.default.svc.cluster.local:50051"
+    echo "  Service ClusterIP: $WORKER_CLUSTER_IP"
+    echo "  Use in load generator: $WORKER_CLUSTER_IP:50051"
   fi
 else
   echo "  Worker not deployed"
@@ -99,7 +105,7 @@ echo ""
 # 6. Recommendations
 echo "[6] Recommendations:"
 if [ "$DUMMY_SERVICES" -eq 0 ]; then
-  echo "  ⚠ No dummy services found. Create some with: ./scripts/create-dummy-services.sh 100"
+  echo "  ⚠ No dummy services found. Create some with: bash scripts/create-dummy-services.sh 100"
 fi
 
 if [ "$WORKER_SERVICE" -eq 0 ]; then
@@ -110,9 +116,11 @@ if [ "$PROXY_READY" -ne "$PROXY_PODS" ]; then
   echo "  ⚠ Some kube-proxy pods not ready. Check: kubectl -n kube-system get pods -l k8s-app=kube-proxy"
 fi
 
-if [ "$DUMMY_SERVICES" -gt 0 ] && [ "$WORKER_SERVICE" -eq 1 ] && [ "$PROXY_READY" -eq "$PROXY_PODS" ]; then
+if [ "$DUMMY_SERVICES" -gt 0 ] && [ "$WORKER_SERVICE" -ge 1 ] && [ "$PROXY_READY" -eq "$PROXY_PODS" ]; then
   echo "  ✓ Setup looks good! Ready to run experiments."
-  echo "  Run test: go run loadgen-dataplane/load_generator.go --service-count=$((DUMMY_SERVICES + 1))"
+  if [ -n "$WORKER_CLUSTER_IP" ]; then
+    echo "  Run test: go run loadgen-dataplane/load_generator.go --worker=$WORKER_CLUSTER_IP:50051 --service-count=$((DUMMY_SERVICES + 1)) --proxy-mode=$PROXY_MODE --rps=50 --num-requests=2000"
+  fi
 fi
 
 echo ""

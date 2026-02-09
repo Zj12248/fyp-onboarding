@@ -2,7 +2,7 @@ package main
 
 // Usage:
 // go run loadgen-dataplane/load_generator.go \
-//  --worker=<worker-url>:80 \
+//  --worker=<worker-ip>:50051 \
 //  --rps=50 \
 //  --num-requests=1000 \
 //  --proxy-mode=iptables-nft \
@@ -71,6 +71,7 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 		log.Fatalf("Failed to create CSV file: %v", err)
 	}
 	defer csvF.Close()
+	// CSV columns: all time values in microseconds (µs)
 	fmt.Fprintf(csvF, "seq,rtt_us,data_plane_latency_us,worker_processing_us\n")
 
 	var results []requestResult
@@ -102,7 +103,7 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 				fmt.Printf("Sending first request (seq=%d) to worker...\n", seq)
 			}
 
-			// Measure RTT
+			// Measure RTT (capture timestamps in nanoseconds)
 			sendNs := time.Now().UnixNano()
 
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -126,11 +127,12 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 				fmt.Printf("First request successful! RTT=%.2fµs\n", float64(recvNs-sendNs)/1e3)
 			}
 
-			// Calculate latencies in microseconds
-			rttUs := float64(recvNs-sendNs) / 1e3
-			workerProcessingUs := float64(resp.WorkerProcessingNs) / 1e3
-			networkLatencyUs := rttUs - workerProcessingUs
-			dataPlaneLatencyUs := networkLatencyUs / 2.0 // One-way estimate
+			// Calculate latencies in microseconds (convert from nanoseconds)
+			// Conversion: 1 microsecond (µs) = 1000 nanoseconds (ns)
+			rttUs := float64(recvNs-sendNs) / 1e3                        // Total round-trip time
+			workerProcessingUs := float64(resp.WorkerProcessingNs) / 1e3 // Worker processing time
+			networkLatencyUs := rttUs - workerProcessingUs               // Network latency (both ways)
+			dataPlaneLatencyUs := networkLatencyUs / 2.0                 // One-way data plane latency
 
 			result := requestResult{
 				sequenceNum:        seq,
