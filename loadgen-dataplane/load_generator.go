@@ -40,6 +40,7 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 	fmt.Printf("  Service Count: %d\n", config.ServiceCount)
 	fmt.Printf("  Total Requests: %d\n", config.NumRequests)
 	fmt.Printf("  RPS: %d\n", config.RPS)
+	fmt.Printf("  Worker: %s\n", config.WorkerAddr)
 	fmt.Printf("\n")
 
 	// Create output directory and files
@@ -52,12 +53,14 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 	csvFile := fmt.Sprintf("logs/dataplane/%s.csv", runID)
 
 	// Setup logging
+	fmt.Printf("Creating log file: %s\n", logFile)
 	f, err := os.Create(logFile)
 	if err != nil {
 		log.Fatalf("Failed to create log file: %v", err)
 	}
 	defer f.Close()
 	logger := log.New(f, "", log.LstdFlags)
+	fmt.Printf("Creating CSV file: %s\n", csvFile)
 
 	logger.Printf("Test Configuration: ProxyMode=%s, ServiceCount=%d, NumRequests=%d, RPS=%d",
 		config.ProxyMode, config.ServiceCount, config.NumRequests, config.RPS)
@@ -78,15 +81,26 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 	defer ticker.Stop()
 
 	fmt.Printf("Sending %d requests at %d RPS...\n", config.NumRequests, config.RPS)
+	fmt.Printf("Press Ctrl+C to abort if needed\n")
 	testStart := time.Now()
 
 	// Send requests
 	for i := 0; i < config.NumRequests; i++ {
 		<-ticker.C
 
+		// Progress indicator every 100 requests
+		if (i+1)%100 == 0 {
+			fmt.Printf("Sent %d/%d requests...\n", i+1, config.NumRequests)
+		}
+
 		wg.Add(1)
 		go func(seq int) {
 			defer wg.Done()
+
+			// Debug first request
+			if seq == 0 {
+				fmt.Printf("Sending first request (seq=%d) to worker...\n", seq)
+			}
 
 			// Measure RTT
 			sendNs := time.Now().UnixNano()
@@ -99,7 +113,17 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 			recvNs := time.Now().UnixNano()
 
 			if err != nil {
+				logger.Printf("Request %d failed: %v", seq, err)
+				// Print first few errors
+				if seq < 5 {
+					fmt.Printf("[ERROR] Request %d failed: %v\n", seq, err)
+				}
 				return // Skip failed requests
+			}
+
+			// Debug first successful response
+			if seq == 0 {
+				fmt.Printf("First request successful! RTT=%.2fµs\n", float64(recvNs-sendNs)/1e3)
 			}
 
 			// Calculate latencies in microseconds
@@ -121,20 +145,32 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 		}(i)
 	}
 
+	fmt.Printf("Waiting for all requests to complete...\n")
 	wg.Wait()
 	testDuration := time.Since(testStart)
 
 	fmt.Printf("Test completed in %s\n", testDuration.Round(time.Millisecond))
+	fmt.Printf("Successful requests: %d/%d (%.2f%%)\n",
+		len(results), config.NumRequests,
+		float64(len(results))/float64(config.NumRequests)*100.0)
 	logger.Printf("Test completed. Duration=%s, SuccessfulRequests=%d/%d",
 		testDuration, len(results), config.NumRequests)
 
 	if len(results) == 0 {
 		logger.Printf("ERROR: No successful requests recorded!")
+		fmt.Println("\n========================================")
 		fmt.Println("ERROR: No results to analyze!")
+		fmt.Println("All requests failed. Check:")
+		fmt.Printf("  1. Worker is running: kubectl get pod -l app=worker\n")
+		fmt.Printf("  2. DNS resolves: nslookup %s\n", config.WorkerAddr)
+		fmt.Printf("  3. Worker logs: kubectl logs -l app=worker\n")
+		fmt.Println("  4. Network connectivity from this node to cluster")
+		fmt.Println("========================================\n")
 		return
 	}
 
 	// Write results to CSV
+	fmt.Printf("Writing %d results to CSV...\n", len(results))
 	for _, r := range results {
 		fmt.Fprintf(csvF, "%d,%.2f,%.2f,%.2f\n",
 			r.sequenceNum, r.rttUs, r.dataPlaneLatencyUs, r.workerProcessingUs)
@@ -272,15 +308,17 @@ func main() {
 	}
 
 	// Connect to worker
-	fmt.Printf("Connecting to worker at %s...\n", config.WorkerAddr)
+	fmt.Printf("\nConnecting to worker at %s...\n", config.WorkerAddr)
+	fmt.Printf("Using gRPC with insecure credentials...\n")
 	conn, err := grpc.Dial(config.WorkerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		log.Fatalf("Failed to connect: %v", err)
+		log.Fatalf("Failed to connect: %v\nCheck DNS and network connectivity", err)
 	}
 	defer conn.Close()
 
 	client := pb.NewWorkerServiceClient(conn)
-	fmt.Println("Connected successfully")
+	fmt.Println("✓ Connected successfully")
+	fmt.Println("Ready to send requests...\n")
 
 	// Run test
 	RunDataPlaneTest(client, config)
