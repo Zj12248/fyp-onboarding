@@ -175,7 +175,12 @@ func main() {
 		log.Fatalf("[Worker] failed to listen: %v", err)
 	}
 
-	s := grpc.NewServer()
+	// Set larger message size limits to handle kubelet/containerd inspection
+	opts := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(50 * 1024 * 1024), // 50MB receive limit
+		grpc.MaxSendMsgSize(50 * 1024 * 1024), // 50MB send limit
+	}
+	s := grpc.NewServer(opts...)
 	pb.RegisterWorkerServiceServer(s, &server{})
 
 	log.Printf("[Worker] Listening on port :%s", port)

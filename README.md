@@ -37,9 +37,7 @@ Kube-proxy data plane latency comparison: iptables-nft vs nftables.
 3. **(Optional) Enable kube-proxy metrics for Prometheus monitoring:**
    ```bash
    bash scripts/enable-kube-proxy-metrics.sh
-   kubectl apply -f scripts/kube-proxy-servicemonitor.yaml
    ```
-   Verify metrics are accessible: `curl localhost:10249/metrics | grep kubeproxy_sync`
 4. If the worker image is **not** pushed into Docker Hub (or another registry), follow steps 5–7. *(Ensure Docker is installed: `sudo apt install docker.io`)* Otherwise, skip to step 8.
 5. Build the image: `sudo docker build -t zj3214/worker:latest -f Dockerfile .`
 6. Log in to Docker: `docker login -u zj3214`
@@ -66,8 +64,8 @@ go run loadgen-dataplane/load_generator.go \
   --worker=$WORKER_IP:50051 \
   --rps=50 \
   --num-requests=2000 \
-  --proxy-mode=nftables \
-  --service-count=10000
+  --proxy-mode=iptables-nft \
+  --service-count=50054
 ```
 
 **Parameters:**
@@ -127,7 +125,7 @@ go run loadgen-dataplane/load_generator.go \
 6. **Cleanup**:
    ```bash
    kubectl delete -f knative/worker-service.yaml
-   ./scripts/delete-dummy-services.sh
+   bash ./scripts/delete-dummy-services.sh
    ```
 
 7. **Repeat for different service counts** (10, 50, 100, 500, 1000)
