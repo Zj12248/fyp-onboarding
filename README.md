@@ -30,13 +30,13 @@ Kube-proxy data plane latency comparison: iptables-nft vs nftables.
         
 ## Deployment Guide
 1. Setup a Kubernetes cluster (multi-node).
-2. Clone this repository into the cluster node or local machine with kubectl access.
+2. Clone this repository into the cluster node or local machine with kubectl access. (git clone -b data-plane-exp https://github.com/Zj12248/fyp-onboarding.git)
 3. If the worker image is **not** pushed into Docker Hub (or another registry), follow steps 4–6. *(Ensure Docker is installed: `sudo apt install docker.io`)* Otherwise, skip to step 7.
-4. Build the image: `docker build -t <userid>/worker:latest -f Dockerfile .`
-5. Log in to Docker: `docker login -u <username>`
-6. Push the image into the registry: `docker push <userid>/worker:latest`
+4. Build the image: `sudo docker build -t zj3214/worker:latest -f Dockerfile .`
+5. Log in to Docker: `docker login -u zj3214`
+6. Push the image into the registry: `sudo docker push zj3214/worker:latest`
 7. Update the image in `knative/worker-service.yaml` to match your Docker Hub username.
-8. (Optional) Create dummy services to simulate production load: `./scripts/create-dummy-services.sh 100`
+8. (Optional) Create dummy services to simulate production load: `bash ./scripts/create-dummy-services.sh 50000`
 9. Deploy the worker: `kubectl apply -f knative/worker-service.yaml`
 10. Check if the worker is ready: `kubectl get pods -l app=worker`
 11. Verify the service: `kubectl get svc worker`

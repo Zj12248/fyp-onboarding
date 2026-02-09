@@ -2,21 +2,40 @@
 # Create dummy services to increase kube-proxy rule count
 # Usage: ./create-dummy-services.sh <number_of_services>
 
-NUM_SERVICES=${1:-5000}
+NUM_SERVICES=${1:-50000}
 
-echo "Creating $NUM_SERVICES dummy services..."
+echo "Generating YAML for $NUM_SERVICES dummy services..."
+
+# Generate a single YAML file with all services
+YAML_FILE="/tmp/dummy-services-$NUM_SERVICES.yaml"
+> $YAML_FILE  # Clear file
 
 for i in $(seq 1 $NUM_SERVICES); do
-  kubectl create service clusterip dummy-service-$i \
-    --tcp=80:80 \
-    --dry-run=client -o yaml | \
-  kubectl label -f - type=dummy --dry-run=client -o yaml | \
-  kubectl apply -f -
-  
-  if [ $((i % 10)) -eq 0 ]; then
-    echo "Created $i services..."
+  cat >> $YAML_FILE <<EOF
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dummy-service-$i
+  labels:
+    type: dummy
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+  selector:
+    app: nonexistent
+EOF
+
+  if [ $((i % 5000)) -eq 0 ]; then
+    echo "Generated $i service definitions..."
   fi
 done
+
+echo "YAML generated. Applying to cluster..."
+kubectl apply -f $YAML_FILE
 
 echo ""
 echo "Created $NUM_SERVICES dummy services"
