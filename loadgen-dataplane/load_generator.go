@@ -280,7 +280,7 @@ func main() {
 	defer conn.Close()
 
 	client := pb.NewWorkerServiceClient(conn)
-	fmt.Println("Connected successfully\n")
+	fmt.Println("Connected successfully")
 
 	// Run test
 	RunDataPlaneTest(client, config)
