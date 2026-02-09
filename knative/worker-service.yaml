@@ -1,22 +1,47 @@
-apiVersion: serving.knative.dev/v1
+---
+# Deployment: Single pod running the worker
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: default
+spec:
+  replicas: 1  # Single pod for consistent measurements
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+      - name: worker
+        image: zj3214/worker:latest
+        ports:
+        - containerPort: 50051
+          name: grpc
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+
+---
+# Service: Creates kube-proxy rules for packet routing
+apiVersion: v1
 kind: Service
 metadata:
   name: worker
   namespace: default
 spec:
-  template:
-    metadata:
-      annotations:
-        autoscaling.knative.dev/minScale: "1"
-    spec:
-      containerConcurrency: 1
-      containers:
-      - image: zj3214/worker:latest
-        ports:
-          - containerPort: 50051
-            name: h2c
-        resources:
-          requests:
-            cpu: "1"
-          limits:
-            cpu: "1"
+  type: ClusterIP  # Internal cluster IP (kube-proxy handles routing)
+  selector:
+    app: worker
+  ports:
+  - port: 50051
+    targetPort: 50051
+    protocol: TCP
+    name: grpc
