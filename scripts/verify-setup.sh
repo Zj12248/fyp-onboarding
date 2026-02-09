@@ -51,14 +51,20 @@ if [[ "$PROXY_MODE" == *"nftables"* ]]; then
   echo -n "  Total nftables rules: "
   sudo nft list ruleset 2>/dev/null | grep -c 'rule' || echo '0'
   
-  echo -n "  Dummy service rules: "
+  echo -n "  Service map entries (O(1) hash lookup): "
+  sudo nft list map inet kube-proxy services 2>/dev/null | grep -c 'elements' || echo '0'
+  
+  echo -n "  Dummy service entries: "
   sudo nft list ruleset 2>/dev/null | grep -c 'dummy-service' || echo '0'
 else
   echo -n "  Total iptables rules: "
   sudo iptables-save 2>/dev/null | wc -l || echo '0'
   
-  echo -n "  Dummy service rules: "
-  sudo iptables -t nat -L KUBE-SERVICES 2>/dev/null | grep -c 'dummy-service' || echo '0'
+  echo -n "  KUBE-SERVICES chain rules (O(n) scan): "
+  sudo iptables -t nat -L KUBE-SERVICES --line-numbers -n 2>/dev/null | tail -n +3 | wc -l || echo '0'
+  
+  echo -n "  Dummy service rules in chain: "
+  sudo iptables -t nat -L KUBE-SERVICES -n 2>/dev/null | grep -c 'dummy-service' || echo '0'
 fi
 echo ""
 
