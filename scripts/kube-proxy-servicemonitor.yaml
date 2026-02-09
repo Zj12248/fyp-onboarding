@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-proxy-metrics
+  namespace: kube-system
+  labels:
+    k8s-app: kube-proxy
+spec:
+  clusterIP: None
+  ports:
+  - name: metrics
+    port: 10249
+    protocol: TCP
+    targetPort: 10249
+  selector:
+    k8s-app: kube-proxy
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kube-proxy
+  namespace: kube-system
+  labels:
+    k8s-app: kube-proxy
+spec:
+  endpoints:
+  - interval: 30s
+    port: metrics
+  jobLabel: k8s-app
+  namespaceSelector:
+    matchNames:
+    - kube-system
+  selector:
+    matchLabels:
+      k8s-app: kube-proxy
