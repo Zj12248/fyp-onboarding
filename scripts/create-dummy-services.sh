@@ -2,16 +2,23 @@
 # Create dummy services to increase kube-proxy rule count
 # Usage: ./create-dummy-services.sh <number_of_services>
 
-NUM_SERVICES=${1:-50000}
+# Default to 10,000 if not set
+NUM_SERVICES=${1:-10000}
+BATCH_SIZE=1000
 
-echo "Generating YAML for $NUM_SERVICES dummy services..."
+echo "Preparing to generate $NUM_SERVICES dummy services..."
 
-# Generate a single YAML file with all services
-YAML_FILE="/tmp/dummy-services-$NUM_SERVICES.yaml"
-> $YAML_FILE  # Clear file
+# Create a temporary file
+BATCH_FILE="/tmp/dummy-batch.yaml"
+
+start_time=$(date +%s)
 
 for i in $(seq 1 $NUM_SERVICES); do
-  cat >> $YAML_FILE <<EOF
+  # Cycle through 192.0.2.1 to 192.0.2.254 (TEST-NET-1)
+  FAKE_IP="192.0.2.$((($i % 254) + 1))"
+  
+  # 1. Define Service (NOTE: NO SELECTOR allows manual Endpoints)
+  cat >> $BATCH_FILE <<EOF
 ---
 apiVersion: v1
 kind: Service
@@ -25,43 +32,61 @@ spec:
   - port: 80
     targetPort: 80
     protocol: TCP
-  selector:
-    app: nonexistent
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: dummy-service-$i
+  labels:
+    type: dummy
+subsets:
+- addresses:
+  - ip: $FAKE_IP
+  ports:
+  - port: 80
+    protocol: TCP
 EOF
 
-  if [ $((i % 5000)) -eq 0 ]; then
-    echo "Generated $i service definitions..."
+  # 2. Apply in batches to prevent kubectl/API server crashes
+  if [ $((i % BATCH_SIZE)) -eq 0 ]; then
+    echo "Applying batch: Services $i of $NUM_SERVICES..."
+    # Use 'create' instead of 'apply' for speed on new objects; use --save-config=false to save space
+    kubectl create -f $BATCH_FILE --save-config=false 2>/dev/null || kubectl apply -f $BATCH_FILE
+    
+    # Clear the file for the next batch
+    > $BATCH_FILE
   fi
 done
 
-echo "YAML generated. Applying to cluster..."
-kubectl apply -f $YAML_FILE
+# Apply any remaining objects
+if [ -s $BATCH_FILE ]; then
+    echo "Applying final batch..."
+    kubectl create -f $BATCH_FILE --save-config=false 2>/dev/null || kubectl apply -f $BATCH_FILE
+fi
 
-echo ""
-echo "Created $NUM_SERVICES dummy services"
-echo "Verifying:"
-kubectl get svc -l type=dummy --no-headers | wc -l
+rm $BATCH_FILE
 
-echo ""
-echo "Waiting for kube-proxy to update rules..."
-sleep 5
+end_time=$(date +%s)
+duration=$((end_time - start_time))
 
 echo ""
 echo "=============================================="
-echo "  DUMMY SERVICES CREATED!"
+echo " Creation Complete in ${duration}s"
 echo "=============================================="
-echo "Created $NUM_SERVICES dummy services for kube-proxy testing."
+echo "Verifying API Server count:"
+ACTUAL_COUNT=$(kubectl get svc -l type=dummy --no-headers | wc -l)
+echo "Found $ACTUAL_COUNT / $NUM_SERVICES services."
+
 echo ""
-echo "Useful commands:"
-echo "  - View all services: kubectl get svc --all-namespaces"
-echo "  - View dummy services: kubectl get svc -l type=dummy"
-echo "  - Check kube-proxy mode: kubectl -n kube-system get cm kube-proxy -o yaml | grep mode:"
-echo "  - Check kube-proxy logs: kubectl -n kube-system logs -l k8s-app=kube-proxy --tail=20"
-echo "  - View iptables rules: sudo iptables -t nat -L KUBE-SERVICES | grep dummy"
-echo "  - View nftables rules: sudo nft list ruleset | grep dummy"
+echo "NOTE: It may take several minutes for kube-proxy to program these rules."
+echo "If using 'iptables' mode, creating 50k services may severely degrade node performance."
+
 echo ""
-echo "Next steps:"
-echo "  1. Deploy worker: kubectl apply -f knative/worker-service.yaml"
-echo "  2. Run test: go run loadgen-dataplane/load_generator.go --service-count=$((NUM_SERVICES + 1))"
-echo "=============================================="
+echo "Diagnostic commands:"
+echo "  1. Check kube-proxy logs for sync lag:"
+echo "     kubectl -n kube-system logs -l k8s-app=kube-proxy --tail=20"
+echo "  2. Count iptables rules (Run on Node):"
+echo "     sudo iptables-save | grep 'dummy-service' | wc -l"
+echo "  3. Verify endpoints:"
+echo "     kubectl get endpoints dummy-service-1"
 echo ""
