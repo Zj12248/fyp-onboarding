@@ -45,6 +45,11 @@ func main() {
 		panic(err.Error())
 	}
 
+	// Increase rate limits for high-throughput operations
+	// Default QPS=5 is too low for parallel service creation
+	config.QPS = 100   // requests per second
+	config.Burst = 200 // burst capacity
+
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		panic(err.Error())
