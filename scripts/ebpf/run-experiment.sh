@@ -174,6 +174,10 @@ PGDEV=/proc/net/pktgen/$IFACE
 # Calculate count based on duration and rate
 PACKET_COUNT=$((DURATION * PACKET_RATE))
 
+# Clear conntrack before starting to ensure clean state
+echo "Clearing conntrack table..."
+conntrack -F 2>/dev/null || true
+
 cat > $PGDEV <<EOF
 count $PACKET_COUNT
 clone_skb 0
@@ -186,8 +190,6 @@ udp_src_min 1024
 udp_src_max 65535
 udp_dst_min 50051
 udp_dst_max 50051
-flag UDPSRC_RND
-flag UDPDST_RND
 EOF
 
 echo "✓ pktgen configured: $PACKET_COUNT packets to $WORKER_IP:50051"
@@ -200,7 +202,7 @@ echo ""
 if [ "$WARMUP_PACKETS" -gt 0 ]; then
     echo "[6/8] Warming up system with $WARMUP_PACKETS packets..."
     
-    # Configure pktgen for warmup
+    # Configure pktgen for warmup (sequential ports)
     cat > $PGDEV <<EOF
 count $WARMUP_PACKETS
 clone_skb 0
@@ -213,8 +215,6 @@ udp_src_min 1024
 udp_src_max 65535
 udp_dst_min 50051
 udp_dst_max 50051
-flag UDPSRC_RND
-flag UDPDST_RND
 EOF
     
     # Start warmup
@@ -299,8 +299,9 @@ echo ""
 # Start pktgen
 echo "start" > /proc/net/pktgen/pgctrl
 
-# Monitor progress
+# Monitor progress and clear conntrack periodically
 START_TIME=$(date +%s)
+LAST_CONNTRACK_CLEAR=0
 while [ $(($(date +%s) - START_TIME)) -lt $DURATION ]; do
     ELAPSED=$(($(date +%s) - START_TIME))
     REMAINING=$((DURATION - ELAPSED))
@@ -308,7 +309,15 @@ while [ $(($(date +%s) - START_TIME)) -lt $DURATION ]; do
     # Get packet count
     SENT=$(cat /proc/net/pktgen/$IFACE 2>/dev/null | grep "Sofar:" | awk '{print $2}')
     
-    printf "\r[%d/%ds] Packets sent: %s " $ELAPSED $DURATION $SENT
+    # Clear conntrack every 50,000 packets to prevent port collision caching
+    if [ -n "$SENT" ] && [ $((SENT / 50000)) -gt $LAST_CONNTRACK_CLEAR ]; then
+        LAST_CONNTRACK_CLEAR=$((SENT / 50000))
+        conntrack -F 2>/dev/null || true
+        printf "\r[%d/%ds] Packets: %s [conntrack cleared @ %d×50k] " $ELAPSED $DURATION $SENT $LAST_CONNTRACK_CLEAR
+    else
+        printf "\r[%d/%ds] Packets sent: %s " $ELAPSED $DURATION $SENT
+    fi
+    
     sleep 2
 done
 

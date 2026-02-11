@@ -319,7 +319,7 @@ type TestConfig struct {
 func createDummyServices(count int, projectRoot string) error {
 	fmt.Printf("Creating %d dummy services...\n", count)
 	scriptDir := filepath.Join(projectRoot, "scripts/create-dummy-services")
-	cmd := exec.Command("go", "run", "main.go", strconv.Itoa(count))
+	cmd := exec.Command("go", "run", "main.go", "-count", strconv.Itoa(count))
 	cmd.Dir = scriptDir // Run from the script directory so go.mod is found
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
