@@ -16,6 +16,9 @@ PROXY_MODE=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="logs/ebpf"
 
+# Source common functions
+source "$SCRIPT_DIR/common.sh"
+
 echo "=============================================="
 echo "  eBPF Kube-Proxy Latency Experiment"
 echo "=============================================="
@@ -85,10 +88,7 @@ echo ""
 
 echo "[3/7] Detecting kube-proxy mode..."
 
-PROXY_MODE=$(kubectl -n kube-system get cm kube-proxy -o yaml 2>/dev/null | grep -A1 "mode:" | tail -1 | awk '{print $2}' | tr -d '"')
-if [ -z "$PROXY_MODE" ] || [ "$PROXY_MODE" = "null" ]; then
-    PROXY_MODE="iptables"  # Default
-fi
+PROXY_MODE=$(get_kubeproxy_mode)
 
 echo "✓ Kube-proxy mode: $PROXY_MODE"
 echo ""
@@ -99,31 +99,19 @@ echo ""
 
 echo "[3.5/7] Checking worker position in KUBE-SERVICES chain..."
 
-if [ "$PROXY_MODE" = "iptables" ]; then
-    WORKER_POSITION=$(sudo iptables -t nat -L KUBE-SERVICES --line-numbers -n | grep "$WORKER_IP" | grep "dpt:50051" | head -1 | awk '{print $1}')
-    TOTAL_RULES=$(sudo iptables -t nat -L KUBE-SERVICES --line-numbers -n | tail -n +3 | wc -l)
-    
-    if [ -n "$WORKER_POSITION" ] && [ -n "$TOTAL_RULES" ] && [ "$TOTAL_RULES" -gt 0 ]; then
-        RELATIVE_POSITION=$(awk "BEGIN {printf \"%.2f\", ($WORKER_POSITION / $TOTAL_RULES) * 100}")
-        echo "✓ Worker position: $WORKER_POSITION / $TOTAL_RULES (${RELATIVE_POSITION}%)"
-        
-        # Warn if worker is too early in chain (< 25%)
-        if awk "BEGIN {exit !($RELATIVE_POSITION < 25)}"; then
-            echo "⚠ WARNING: Worker is near the beginning of the chain!"
-            echo "  This may underestimate O(n) cost. Consider recreating services."
-            echo "  See README for deployment order: dummy services BEFORE worker."
-        fi
+WORKER_POSITION=$(sudo iptables -t nat -L KUBE-SERVICES --line-numbers -n | grep "$WORKER_IP" | grep "dpt:50051" | head -1 | awk '{print $1}')
+TOTAL_RULES=$(sudo iptables -t nat -L KUBE-SERVICES --line-numbers -n | tail -n +3 | wc -l)
+
+if [ -n "$WORKER_POSITION" ] && [ -n "$TOTAL_RULES" ] && [ "$TOTAL_RULES" -gt 0 ]; then
+    if [ "$PROXY_MODE" = "nftables" ]; then
+        echo "✓ Worker position: $WORKER_POSITION / $TOTAL_RULES [nftables uses hash tables - position irrelevant]"
     else
-        echo "⚠ Could not determine worker position in iptables chain"
-        WORKER_POSITION="unknown"
-        TOTAL_RULES="unknown"
-        RELATIVE_POSITION="unknown"
+        echo "✓ Worker position: $WORKER_POSITION / $TOTAL_RULES"
     fi
 else
-    echo "✓ nftables mode - using hash table (position irrelevant)"
-    WORKER_POSITION="N/A"
-    TOTAL_RULES="N/A"
-    RELATIVE_POSITION="N/A"
+    echo "⚠ Could not determine worker position in iptables chain"
+    WORKER_POSITION="unknown"
+    TOTAL_RULES="unknown"
 fi
 echo ""
 
@@ -148,7 +136,7 @@ Worker ClusterIP: $WORKER_IP
 Duration: ${DURATION}s
 Packet rate: ${PACKET_RATE} pps
 Warmup packets: ${WARMUP_PACKETS}
-Worker position: $WORKER_POSITION / $TOTAL_RULES (${RELATIVE_POSITION}%)
+Worker position: $WORKER_POSITION / $TOTAL_RULES
 ============================================
 
 EOF
@@ -351,7 +339,7 @@ echo ""
 echo "Configuration:"
 echo "  - Kube-proxy mode: $PROXY_MODE"
 echo "  - Worker ClusterIP: $WORKER_IP"
-echo "  - Worker position: $WORKER_POSITION / $TOTAL_RULES (${RELATIVE_POSITION}%)"
+echo "  - Worker position: $WORKER_POSITION / $TOTAL_RULES"
 echo "  - Duration: ${DURATION}s"
 echo "  - Warmup: ${WARMUP_PACKETS} packets"
 echo "  - Target packet rate: ${PACKET_RATE} pps"
@@ -364,5 +352,7 @@ echo "  cat $LOG_FILE"
 echo ""
 echo "Summary:"
 tail -n 50 "$LOG_FILE" | grep -A 20 "FINAL REPORT" || echo "Processing..."
+echo ""
+echo "Worker Position: $WORKER_POSITION / $TOTAL_RULES"
 echo ""
 echo "=============================================="

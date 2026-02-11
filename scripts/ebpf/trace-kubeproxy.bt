@@ -1,195 +1,123 @@
 #!/usr/bin/env bpftrace
 /*
- * Trace kube-proxy data plane latency using eBPF
- * Measures ipt_do_table (iptables) and nft_do_chain (nftables) execution time
- * 
- * Usage: sudo bpftrace trace-kubeproxy.bt
+ * Trace kube-proxy data plane latency (Clean Version)
+ * - Interval: Shows INSTANTANEOUS latency (last 5s)
+ * - End: Shows CUMULATIVE latency (entire run)
  */
 
 BEGIN
 {
-    printf("====================================================\n");
-    printf("  Kube-Proxy Data Plane Latency Tracer (eBPF)\n");
-    printf("====================================================\n");
-    printf("Tracing iptables (ipt_do_table) and nftables (nft_do_chain)...\n");
-    printf("Press Ctrl-C to stop and show statistics.\n\n");
+    printf("==========================================================\n");
+    printf(" Kube-Proxy Latency Tracer (eBPF)\n");
+    printf("==========================================================\n");
+    printf("Tracing... Press Ctrl-C to stop.\n\n");
+    printf("%-10s | %-12s | %-10s | %-15s\n", "TIME", "PACKETS/5s", "AVG LATENCY", "MAX LATENCY");
+    printf("----------------------------------------------------------\n");
     
-    @iptables_count = 0;
-    @nftables_count = 0;
+    // Global Totals (For Final Report)
+    @total_count = 0;
+    @total_sum = 0;
+    @total_max = 0;
+    
+    // Interval Stats (Reset every 5s)
+    @int_count = 0;
+    @int_sum = 0;
+    @int_max = 0;
 }
 
 /* ========================================
- * IPTABLES MODE TRACING
+ * PROBE LOGIC (Handles both iptables & nftables)
  * ======================================== */
 
-// Entry probe for ipt_do_table (iptables rule traversal)
-kprobe:ipt_do_table
-{
-    @ipt_start[tid] = nsecs;
-}
+// Unified function to process latency
+// We use a macro-like approach by repeating logic since bpftrace functions are limited
+// Logic: 1. Calc Duration, 2. Update Interval, 3. Update Total
 
-// Return probe for ipt_do_table
-kretprobe:ipt_do_table
-/@ipt_start[tid]/
-{
-    $duration_ns = nsecs - @ipt_start[tid];
-    $duration_us = $duration_ns / 1000;
-    
-    // Histogram of latency in microseconds
-    @ipt_latency_us = hist($duration_us);
-    
-    // Count total invocations
-    @iptables_count++;
-    
-    // Track min/max/sum for statistics
-    @ipt_min_us = min($duration_us);
-    @ipt_max_us = max($duration_us);
-    @ipt_sum_us = sum($duration_us);
-    
-    delete(@ipt_start[tid]);
-}
+kprobe:ipt_do_table   { @start[tid] = nsecs; }
+kprobe:nft_do_chain   { @start[tid] = nsecs; }
 
-/* ========================================
- * NFTABLES MODE TRACING
- * ======================================== */
-
-// Entry probe for nft_do_chain (nftables rule traversal)
-kprobe:nft_do_chain
+kretprobe:ipt_do_table, kretprobe:nft_do_chain
+/@start[tid]/
 {
-    @nft_start[tid] = nsecs;
-}
+    $start = @start[tid];
+    
+    // 1. Safety Checks
+    if ($start == 0) { return; }
+    $dur_ns = nsecs - $start;
+    $dur_us = $dur_ns / 1000;
+    
+    // Filter crazy outliers (>1s)
+    if ($dur_us > 1000000) { delete(@start[tid]); return; }
 
-// Return probe for nft_do_chain
-kretprobe:nft_do_chain
-/@nft_start[tid]/
-{
-    $duration_ns = nsecs - @nft_start[tid];
-    $duration_us = $duration_ns / 1000;
+    // 2. Cast to safe unsigned integer
+    $safe_dur = (uint64)$dur_us;
+
+    // 3. Update Interval Stats (Reset every 5s)
+    @int_count++;
+    @int_sum += $safe_dur;
+    if ($safe_dur > @int_max) { @int_max = $safe_dur; }
+
+    // 4. Update Total Stats (For Final Report)
+    @total_count++;
+    @total_sum += $safe_dur;
+    if ($safe_dur > @total_max) { @total_max = $safe_dur; }
     
-    // Histogram of latency in microseconds
-    @nft_latency_us = hist($duration_us);
-    
-    // Count total invocations
-    @nftables_count++;
-    
-    // Track min/max/sum for statistics
-    @nft_min_us = min($duration_us);
-    @nft_max_us = max($duration_us);
-    @nft_sum_us = sum($duration_us);
-    
-    
-    delete(@nft_start[tid]);
+    // 5. Histogram (Keep for final report)
+    @dist_latency = hist($safe_dur);
+
+    delete(@start[tid]);
 }
 
 /* ========================================
- * PERIODIC STATISTICS (every 5 seconds)
+ * LIVE REPORTING (Every 5s)
  * ======================================== */
 
 interval:s:5
 {
-    time("\n%H:%M:%S ");
-    printf("Statistics:\n");
-    
-    if (@iptables_count > 0) {
-        $ipt_avg = @ipt_sum_us / @iptables_count;
-        printf("  [iptables] Count: %d, Min: %d us, Avg: %d us, Max: %d us\n",
-               @iptables_count, @ipt_min_us, $ipt_avg, @ipt_max_us);
+    // Check if we have data in this interval
+    if (@int_count > 0) {
+        $avg = @int_sum / @int_count;
+        
+        // Print standardized columns
+        time("%H:%M:%S   ");
+        printf("| %-12d | %-6d us  | %-6d us\n", 
+               @int_count, $avg, @int_max);
+    } else {
+        time("%H:%M:%S   ");
+        printf("| %-12s | %-10s | %-15s\n", "0", "-", "-");
     }
-    
-    if (@nftables_count > 0) {
-        $nft_avg = @nft_sum_us / @nftables_count;
-        printf("  [nftables] Count: %d, Min: %d us, Avg: %d us, Max: %d us\n",
-               @nftables_count, @nft_min_us, $nft_avg, @nft_max_us);
-    }
-    
-    if (@iptables_count == 0 && @nftables_count == 0) {
-        printf("  No packets traced yet. Ensure traffic is flowing to worker service.\n");
-    }
+
+    // RESET Interval Stats
+    clear(@int_count);
+    clear(@int_sum);
+    clear(@int_max);
 }
 
 /* ========================================
- * FINAL REPORT (on Ctrl-C)
+ * FINAL SUMMARY
  * ======================================== */
 
 END
 {
-    printf("\n====================================================\n");
-    printf("  FINAL REPORT\n");
-    printf("====================================================\n\n");
-    
-    // IPTABLES RESULTS
-    if (@iptables_count > 0) {
-        $ipt_avg = @ipt_sum_us / @iptables_count;
+    printf("\n==========================================================\n");
+    printf(" FINAL SUMMARY REPORT\n");
+    printf("==========================================================\n");
+
+    if (@total_count > 0) {
+        $avg = @total_sum / @total_count;
         
-        printf("--- IPTABLES MODE ---\n");
-        printf("Total invocations: %d\n", @iptables_count);
-        printf("\nBasic Statistics:\n");
-        printf("  Min latency:    %d us\n", @ipt_min_us);
-        printf("  Mean latency:   %d us\n", $ipt_avg);
-        printf("  Max latency:    %d us\n", @ipt_max_us);
+        printf("Total Packets Traced:  %d\n", @total_count);
+        printf("Average Latency:       %d us\n", $avg);
+        printf("Maximum Latency:       %d us\n", @total_max);
         
-        printf("\nLatency Distribution (microseconds):\n");
-        print(@ipt_latency_us);
-        printf("\n");
+        printf("\nLatency Distribution (Logarithmic):\n");
+        print(@dist_latency);
     } else {
-        printf("--- IPTABLES MODE ---\n");
-        printf("No iptables traffic observed.\n\n");
+        printf("\nNo packets captured.\n");
     }
     
-    // NFTABLES RESULTS
-    if (@nftables_count > 0) {
-        $nft_avg = @nft_sum_us / @nftables_count;
-        
-        printf("--- NFTABLES MODE ---\n");
-        printf("Total invocations: %d\n", @nftables_count);
-        printf("\nBasic Statistics:\n");
-        printf("  Min latency:    %d us\n", @nft_min_us);
-        printf("  Mean latency:   %d us\n", $nft_avg);
-        printf("  Max latency:    %d us\n", @nft_max_us);
-        
-        printf("\nLatency Distribution (microseconds):\n");
-        print(@nft_latency_us);
-        printf("\n");
-    } else {
-        printf("--- NFTABLES MODE ---\n");
-        printf("No nftables traffic observed.\n\n");
-    }
-    
-    // ERROR MESSAGING
-    if (@iptables_count == 0 && @nftables_count == 0) {
-        printf("====================================================\n");
-        printf("  WARNING: No traffic detected!\n");
-        printf("====================================================\n");
-        printf("\nPossible reasons:\n");
-        printf("1. No traffic was flowing to Services during trace\n");
-        printf("2. Kernel symbols missing - check: cat /proc/kallsyms | grep -E 'ipt_do_table|nft_do_chain'\n");
-        printf("3. pktgen not sending packets to worker service\n");
-        printf("4. Kube-proxy not processing traffic\n\n");
-    }
-    
-    // COMPARISON
-    if (@iptables_count > 0 && @nftables_count > 0) {
-        printf("====================================================\n");
-        printf("  WARNING: Both iptables and nftables traffic detected!\n");
-        printf("====================================================\n");
-        printf("This is unusual - kube-proxy should use only one mode.\n\n");
-    }
-    
-    printf("====================================================\n");
-    
-    // Cleanup
-    clear(@ipt_start);
-    clear(@nft_start);
-    clear(@ipt_latency_us);
-    clear(@nft_latency_us);
-    clear(@iptables_count);
-    clear(@nftables_count);
-    clear(@ipt_sum_us);
-    clear(@ipt_sum_sq);
-    clear(@ipt_min_us);
-    clear(@ipt_max_us);
-    clear(@nft_sum_us);
-    clear(@nft_sum_sq);
-    clear(@nft_min_us);
-    clear(@nft_max_us);
+    // Clear all maps
+    clear(@start); clear(@dist_latency);
+    clear(@total_count); clear(@total_sum); clear(@total_max);
+    clear(@int_count); clear(@int_sum); clear(@int_max);
 }
