@@ -23,6 +23,7 @@ var (
 	namespace  *string
 	count      *int
 	workers    *int
+	startIndex *int
 )
 
 func main() {
@@ -34,9 +35,11 @@ func main() {
 	namespace = flag.String("namespace", "default", "namespace for the services")
 	count = flag.Int("count", 10000, "number of dummy services to create")
 	workers = flag.Int("workers", 50, "number of parallel workers (API call concurrency)")
+	startIndex = flag.Int("start-index", 1, "starting index for service numbering (for incremental creation)")
 	flag.Parse()
 
-	fmt.Printf("Creating %d dummy services with %d parallel workers...\n", *count, *workers)
+	endIndex := *startIndex + *count - 1
+	fmt.Printf("Creating %d dummy services (dummy-service-%d to dummy-service-%d) with %d parallel workers...\n", *count, *startIndex, endIndex, *workers)
 	startTime := time.Now()
 
 	// Build Kubernetes client
@@ -67,7 +70,7 @@ func main() {
 	}
 
 	// Send jobs
-	for i := 1; i <= *count; i++ {
+	for i := *startIndex; i < *startIndex+*count; i++ {
 		jobs <- i
 	}
 	close(jobs)

@@ -78,7 +78,8 @@ ensure_worker_deployed() {
 
 create_dummy_services() {
     local count="$1"
-    local project_root="$2"
+    local start_index="$2"
+    local project_root="$3"
     
     # Find go binary (needed when running with sudo)
     local GO_BIN=$(which go 2>/dev/null || find /usr/local/go/bin /usr/bin /home/*/go/bin -name go 2>/dev/null | head -1)
@@ -88,9 +89,9 @@ create_dummy_services() {
         return 1
     fi
     
-    echo -e "${BLUE}Creating $count dummy services...${NC}"
+    echo -e "${BLUE}Creating $count dummy services starting from index $start_index...${NC}"
     cd "$project_root/scripts/create-dummy-services"
-    "$GO_BIN" run main.go -count "$count"
+    "$GO_BIN" run main.go -count "$count" -start-index "$start_index"
     local result=$?
     cd - > /dev/null
     return $result

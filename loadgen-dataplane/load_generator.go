@@ -316,10 +316,10 @@ type TestConfig struct {
 }
 
 // ---------------- Service Management ----------------
-func createDummyServices(count int, projectRoot string) error {
-	fmt.Printf("Creating %d dummy services...\n", count)
+func createDummyServices(count int, startIndex int, projectRoot string) error {
+	fmt.Printf("Creating %d dummy services starting from index %d...\n", count, startIndex)
 	scriptDir := filepath.Join(projectRoot, "scripts/create-dummy-services")
-	cmd := exec.Command("go", "run", "main.go", "-count", strconv.Itoa(count))
+	cmd := exec.Command("go", "run", "main.go", "-count", strconv.Itoa(count), "-start-index", strconv.Itoa(startIndex))
 	cmd.Dir = scriptDir // Run from the script directory so go.mod is found
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -436,7 +436,8 @@ func RunFullExperiment(config TestConfig) {
 		if servicesToAdd > 0 {
 			fmt.Printf("[1/3] Creating %d additional services (total: %d)...\n", servicesToAdd, serviceCount)
 			startTime := time.Now()
-			if err := createDummyServices(servicesToAdd, projectRoot); err != nil {
+			startIndex := currentServiceCount + 1 // Start from next index
+			if err := createDummyServices(servicesToAdd, startIndex, projectRoot); err != nil {
 				fmt.Printf("ERROR: Failed to create services: %v\n", err)
 				continue
 			}

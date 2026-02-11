@@ -87,7 +87,8 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
         # Step 1: Create additional dummy services
         echo -e "${BLUE}[1/4] Creating $SERVICES_TO_ADD additional dummy services (total: $SERVICE_COUNT)...${NC}"
         START_TIME=$(date +%s)
-        if ! create_dummy_services "$SERVICES_TO_ADD" "$PROJECT_ROOT"; then
+        START_INDEX=$((CURRENT_SERVICE_COUNT + 1))
+        if ! create_dummy_services "$SERVICES_TO_ADD" "$START_INDEX" "$PROJECT_ROOT"; then
             echo -e "${RED}✗ Failed to create services${NC}"
             continue
         fi
