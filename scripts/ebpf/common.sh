@@ -124,11 +124,25 @@ get_dummy_service_count() {
 # ========================================
 
 get_kubeproxy_mode() {
-    local mode=$(kubectl -n kube-system get cm kube-proxy -o yaml 2>/dev/null | grep -A1 "mode:" | tail -1 | awk '{print $2}' | tr -d '"')
-    if [ -z "$mode" ] || [ "$mode" = "null" ]; then
-        mode="iptables"
+    # 1. Get ONLY the config data (ignores metadata/timestamps)
+    #    We try 'config.conf' (standard) and fallback to 'config' (older clusters)
+    local config_data=$(kubectl -n kube-system get cm kube-proxy -o jsonpath='{.data.config\.conf}' 2>/dev/null)
+    if [ -z "$config_data" ]; then
+        config_data=$(kubectl -n kube-system get cm kube-proxy -o jsonpath='{.data.config}' 2>/dev/null)
     fi
-    echo "$mode"
+
+    # 2. Parse the mode
+    #    - grep -E "^[[:space:]]*mode:": Finds line starting with 'mode:' (ignoring indentation)
+    #    - awk '{print $2}': Prints the value
+    #    - tr -d '"': Removes quotes
+    local mode=$(echo "$config_data" | grep -E "^[[:space:]]*mode:" | awk '{print $2}' | tr -d '"')
+
+    # 3. Logic: Default to "iptables" if empty or null
+    if [ -z "$mode" ]; then
+        echo "iptables"
+    else
+        echo "$mode"
+    fi
 }
 
 get_worker_position() {
@@ -165,11 +179,10 @@ extract_metric_from_log() {
 extract_worker_position_from_log() {
     local log_file="$1"
     
-    local worker_pos=$(grep "Worker position:" "$log_file" | grep -oP '\d+(?= /)' || echo "N/A")
-    local total_rules=$(grep "Worker position:" "$log_file" | grep -oP '/ \K\d+(?= \()' || echo "N/A")
-    local rel_pos=$(grep "Worker position:" "$log_file" | grep -oP '\(\K[\d.]+(?=%)' || echo "N/A")
+    local worker_pos=$(grep "Worker position:" "$log_file" | grep -oP '\d+(?= /)' | head -1 || echo "N/A")
+    local total_rules=$(grep "Worker position:" "$log_file" | grep -oP '/ \K\d+' | head -1 || echo "N/A")
     
-    echo "$worker_pos|$total_rules|$rel_pos"
+    echo "$worker_pos|$total_rules"
 }
 
 # ========================================

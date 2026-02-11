@@ -113,15 +113,15 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     echo -e "${CYAN}Extracting metrics...${NC}"
     
     # Get worker position from log
-    IFS='|' read -r WORKER_POS TOTAL_RULES REL_POS <<< "$(extract_worker_position_from_log "$LATEST_LOG")"
+    IFS='|' read -r WORKER_POS TOTAL_RULES <<< "$(extract_worker_position_from_log "$LATEST_LOG")"
     
     # Extract latency metrics
     MEAN_LATENCY=$(extract_metric_from_log "$LATEST_LOG" "Mean latency:")
     MIN_LATENCY=$(extract_metric_from_log "$LATEST_LOG" "Min latency:")
     MAX_LATENCY=$(extract_metric_from_log "$LATEST_LOG" "Max latency:")
     
-    # Append to CSV
-    append_csv_row "$RESULTS_FILE" "$SERVICE_COUNT" "$PROXY_MODE" "$WORKER_POS" "$TOTAL_RULES" "$REL_POS" \
+    # Append to CSV (no relative position column anymore)
+    append_csv_row "$RESULTS_FILE" "$SERVICE_COUNT" "$PROXY_MODE" "$WORKER_POS" "$TOTAL_RULES" "N/A" \
                    "$MEAN_LATENCY" "$MIN_LATENCY" "$MAX_LATENCY" "TBD" "TBD" "TBD" "$LATEST_LOG"
     
     echo -e "${GREEN}✓ Results recorded${NC}"
