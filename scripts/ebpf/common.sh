@@ -80,9 +80,17 @@ create_dummy_services() {
     local count="$1"
     local project_root="$2"
     
+    # Find go binary (needed when running with sudo)
+    local GO_BIN=$(which go 2>/dev/null || find /usr/local/go/bin /usr/bin /home/*/go/bin -name go 2>/dev/null | head -1)
+    if [ -z "$GO_BIN" ]; then
+        echo -e "${RED}ERROR: go binary not found in PATH${NC}"
+        echo "Hint: Run with sudo -E to preserve PATH, or ensure go is in /usr/local/go/bin"
+        return 1
+    fi
+    
     echo -e "${BLUE}Creating $count dummy services...${NC}"
     cd "$project_root/scripts/create-dummy-services"
-    go run main.go -count "$count"
+    "$GO_BIN" run main.go -count "$count"
     local result=$?
     cd - > /dev/null
     return $result
@@ -91,9 +99,17 @@ create_dummy_services() {
 delete_dummy_services() {
     local project_root="$1"
     
+    # Find go binary (needed when running with sudo)
+    local GO_BIN=$(which go 2>/dev/null || find /usr/local/go/bin /usr/bin /home/*/go/bin -name go 2>/dev/null | head -1)
+    if [ -z "$GO_BIN" ]; then
+        echo -e "${RED}ERROR: go binary not found in PATH${NC}"
+        echo "Hint: Run with sudo -E to preserve PATH, or ensure go is in /usr/local/go/bin"
+        return 1
+    fi
+    
     echo -e "${BLUE}Deleting dummy services...${NC}"
     cd "$project_root/scripts/delete-dummy-services"
-    go run main.go
+    "$GO_BIN" run main.go
     local result=$?
     cd - > /dev/null
     return $result

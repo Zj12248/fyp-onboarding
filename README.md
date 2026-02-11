@@ -64,7 +64,7 @@ This project measures the **pure kernel-level packet forwarding latency** in Kub
 **On your development machine:**
 ```bash
 # Clone repository
-git clone https://github.com/Zj12248/fyp-onboarding.git
+git clone -b data-plane-exp https://github.com/Zj12248/fyp-onboarding.git
 cd fyp-onboarding
 
 # Install Go dependencies for service creation
@@ -90,7 +90,7 @@ bpftrace --version
 
 2. **Clone this repository** into the cluster node or local machine with kubectl access:
    ```bash
-   git clone https://github.com/Zj12248/fyp-onboarding.git
+   git clone -b data-plane-exp https://github.com/Zj12248/fyp-onboarding.git
    cd fyp-onboarding
    ```
 
@@ -333,6 +333,22 @@ Shows:
 ---
 
 ## Troubleshooting
+
+### "ERROR: go not found" or "go: command not found"
+This happens when Go is not in root's PATH when running with `sudo`. Fix:
+
+```bash
+# Option 1: Run with sudo -E to preserve your PATH
+sudo -E bash scripts/ebpf/run-full-experiment.sh
+
+# Option 2: Add Go to root's PATH permanently
+sudo ln -s /usr/local/go/bin/go /usr/bin/go
+
+# Option 3: Install Go system-wide
+wget https://go.dev/dl/go1.21.6.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.21.6.linux-amd64.tar.gz
+sudo ln -s /usr/local/go/bin/go /usr/bin/go
+```
 
 ### "ERROR: bpftrace not found"
 ```bash

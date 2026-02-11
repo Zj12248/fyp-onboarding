@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,15 +46,46 @@ func main() {
 		panic(err.Error())
 	}
 
-	// Delete services with label type=dummy
+	// Delete services with label type=dummy (using List + Delete since DeleteCollection not available)
 	fmt.Println("Deleting services with label type=dummy...")
-	err = clientset.CoreV1().Services(*namespace).DeleteCollection(
+	serviceList, err := clientset.CoreV1().Services(*namespace).List(
 		context.Background(),
-		metav1.DeleteOptions{},
 		metav1.ListOptions{LabelSelector: "type=dummy"},
 	)
 	if err != nil {
-		fmt.Printf("Error deleting services: %v\n", err)
+		fmt.Printf("Error listing services: %v\n", err)
+	} else {
+		// Use concurrency to delete services quickly (matching client Burst)
+		count := len(serviceList.Items)
+		fmt.Printf("Found %d services to delete. Starting parallel deletion...\n", count)
+
+		var wg sync.WaitGroup
+		// Limit concurrency to avoid overwhelming the client or system resources
+		// The client rate limiter (QPS=100) will still throttle us appropriately
+		semaphore := make(chan struct{}, 50)
+
+		for _, svc := range serviceList.Items {
+			wg.Add(1)
+			semaphore <- struct{}{} // Acquire token
+
+			go func(name string) {
+				defer wg.Done()
+				defer func() { <-semaphore }() // Release token
+
+				err := clientset.CoreV1().Services(*namespace).Delete(
+					context.Background(),
+					name,
+					metav1.DeleteOptions{},
+				)
+				if err != nil {
+					// Ignore "not found" errors which happen if deletion races
+					fmt.Printf("Error deleting service %s: %v\n", name, err)
+				}
+			}(svc.Name)
+		}
+
+		wg.Wait()
+		fmt.Printf("Deleted %d services.\n", count)
 	}
 
 	// Delete endpointslices with label type=dummy
