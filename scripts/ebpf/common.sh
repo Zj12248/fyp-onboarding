@@ -173,7 +173,8 @@ extract_metric_from_log() {
     local log_file="$1"
     local pattern="$2"
     
-    grep "$pattern" "$log_file" | grep -oP '\d+(?= us)' | head -1 || echo "N/A"
+    # Pattern matches: "Average Latency:       123 us" or "Maximum Latency:       456 us"
+    grep "$pattern" "$log_file" | grep -oP '\d+' | tail -1 || echo ""
 }
 
 extract_worker_position_from_log() {

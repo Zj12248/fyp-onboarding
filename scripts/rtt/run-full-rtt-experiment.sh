@@ -1,32 +1,30 @@
 #!/bin/bash
 #
-# Full automated experiment: Test kube-proxy latency at multiple service counts
-# Usage: sudo bash run-full-experiment.sh [duration] [packet_rate] [warmup_packets]
+# Full automated RTT experiment: Test kube-proxy RTT latency at multiple service counts
+# Usage: sudo bash run-full-rtt-experiment.sh [packet_count] [warmup_count]
 #
-# Example: sudo bash run-full-experiment.sh 10 10000 100
+# Example: sudo bash run-full-rtt-experiment.sh 100 10
 #
 
 set -e
 
-# Source common functions
+# Source common functions from ebpf directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
+source "$SCRIPT_DIR/../ebpf/common.sh"
 
-DURATION=${1:-10}
-PACKET_RATE=${2:-10000}
-WARMUP_PACKETS=${3:-100}
-SERVICE_COUNTS=(100 1000 5000 10000 20000)
+PACKET_COUNT=${1:-100}
+WARMUP_COUNT=${2:-10}
+SERVICE_COUNTS=(100 1000 5000 10000 20000 30000)
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-print_experiment_header "Full eBPF Kube-Proxy Experiment Suite"
+print_experiment_header "Full RTT Kube-Proxy Experiment Suite"
 
 echo "Configuration:"
 echo "  Service counts: ${SERVICE_COUNTS[@]}"
-echo "  Duration per test: ${DURATION}s"
-echo "  Packet rate: ${PACKET_RATE} pps"
-echo "  Warmup: ${WARMUP_PACKETS} packets"
+echo "  Packets per test: ${PACKET_COUNT}"
+echo "  Warmup: ${WARMUP_COUNT} packets"
 echo ""
-echo "Estimated total time: ~$((${#SERVICE_COUNTS[@]} * (DURATION + 200))) seconds"
+echo "Estimated total time: ~$((${#SERVICE_COUNTS[@]} * 10)) minutes"
 echo ""
 
 # ========================================
@@ -35,8 +33,20 @@ echo ""
 
 echo -e "${BLUE}[Pre-flight] Checking prerequisites...${NC}"
 
-if ! check_prerequisites true true; then
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}ERROR: This script must be run as root (sudo)${NC}"
     exit 1
+fi
+
+if ! command -v kubectl &> /dev/null; then
+    echo -e "${RED}ERROR: kubectl not found${NC}"
+    exit 1
+fi
+
+if ! command -v hping3 &> /dev/null; then
+    echo -e "${YELLOW}hping3 not found. Installing...${NC}"
+    apt-get install -y hping3
+    echo -e "${GREEN}✓ hping3 installed${NC}"
 fi
 
 # Ensure worker is deployed
@@ -54,8 +64,9 @@ echo -e "${CYAN}Kube-proxy mode: $PROXY_MODE${NC}"
 echo ""
 
 # Create results summary file
-RESULTS_FILE="$PROJECT_ROOT/logs/ebpf/experiment_summary_$(date +%Y%m%d_%H%M%S).csv"
-create_csv_header "$RESULTS_FILE"
+RESULTS_FILE="$PROJECT_ROOT/logs/rtt/rtt_experiment_summary_$(date +%Y%m%d_%H%M%S).csv"
+mkdir -p "$(dirname "$RESULTS_FILE")"
+echo "ServiceCount,ProxyMode,WorkerPosition,TotalRules,MinRTT_us,MeanRTT_us,MaxRTT_us,P50_us,P95_us,P99_us,LogFile" > "$RESULTS_FILE"
 
 echo -e "${GREEN}Results will be saved to: $RESULTS_FILE${NC}"
 echo ""
@@ -94,17 +105,24 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     echo -e "${GREEN}✓ Verified: $ACTUAL_COUNT dummy services + worker${NC}"
     echo ""
     
-    # Step 4: Verify setup
-    echo -e "${BLUE}[4/5] Verifying setup...${NC}"
-    bash "$PROJECT_ROOT/scripts/verify-setup.sh" || true
+    # Step 4: Get worker position
+    echo -e "${BLUE}[4/5] Checking worker position...${NC}"
+    if [ "$PROXY_MODE" = "iptables" ]; then
+        WORKER_POS=$(sudo iptables -t nat -L KUBE-SERVICES --line-numbers -n | grep "$WORKER_IP" | grep "dpt:50051" | head -1 | awk '{print $1}')
+        TOTAL_RULES=$(sudo iptables -t nat -L KUBE-SERVICES --line-numbers -n | tail -n +3 | wc -l)
+    else
+        WORKER_POS="N/A"
+        TOTAL_RULES="N/A"
+    fi
+    echo -e "${GREEN}✓ Worker position: $WORKER_POS / $TOTAL_RULES${NC}"
     echo ""
     
-    # Step 5: Run eBPF experiment
-    echo -e "${BLUE}[5/5] Running eBPF measurement...${NC}"
-    bash "$SCRIPT_DIR/run-experiment.sh" $DURATION $PACKET_RATE $WARMUP_PACKETS
+    # Step 5: Run RTT measurement
+    echo -e "${BLUE}[5/5] Running RTT measurement...${NC}"
+    bash "$SCRIPT_DIR/measure-rtt-hping3.sh" $PACKET_COUNT $WARMUP_COUNT
     
     # Find the most recent log file
-    LATEST_LOG=$(ls -t "$PROJECT_ROOT/logs/ebpf/ebpf_${PROXY_MODE}_"*.log | head -1)
+    LATEST_LOG=$(ls -t "$PROJECT_ROOT/logs/rtt/rtt_${PROXY_MODE}_"*.log | head -1)
     
     echo -e "${GREEN}✓ Measurement complete: $LATEST_LOG${NC}"
     echo ""
@@ -112,17 +130,15 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     # Extract metrics from log file
     echo -e "${CYAN}Extracting metrics...${NC}"
     
-    # Get worker position from log
-    IFS='|' read -r WORKER_POS TOTAL_RULES <<< "$(extract_worker_position_from_log "$LATEST_LOG")"
+    MIN_RTT=$(grep "Min RTT:" "$LATEST_LOG" | grep -oP '\d+' | head -1 || echo "")
+    MEAN_RTT=$(grep "Mean RTT:" "$LATEST_LOG" | grep -oP '\d+' | head -1 || echo "")
+    MAX_RTT=$(grep "Max RTT:" "$LATEST_LOG" | grep -oP '\d+' | head -1 || echo "")
+    P50_RTT=$(grep "P50 (Median):" "$LATEST_LOG" | grep -oP '\d+' | head -1 || echo "")
+    P95_RTT=$(grep "P95:" "$LATEST_LOG" | grep -oP '\d+' | head -1 || echo "")
+    P99_RTT=$(grep "P99:" "$LATEST_LOG" | grep -oP '\d+' | head -1 || echo "")
     
-    # Extract latency metrics (match bpftrace output: "Average Latency:", "Maximum Latency:")
-    MEAN_LATENCY=$(extract_metric_from_log "$LATEST_LOG" "Average Latency:")
-    MIN_LATENCY=""  # Not available in current bpftrace output
-    MAX_LATENCY=$(extract_metric_from_log "$LATEST_LOG" "Maximum Latency:")
-    
-    # Append to CSV (no relative position column anymore)
-    append_csv_row "$RESULTS_FILE" "$SERVICE_COUNT" "$PROXY_MODE" "$WORKER_POS" "$TOTAL_RULES" "N/A" \
-                   "$MEAN_LATENCY" "$MIN_LATENCY" "$MAX_LATENCY" "TBD" "TBD" "TBD" "$LATEST_LOG"
+    # Append to CSV
+    echo "$SERVICE_COUNT,$PROXY_MODE,$WORKER_POS,$TOTAL_RULES,$MIN_RTT,$MEAN_RTT,$MAX_RTT,$P50_RTT,$P95_RTT,$P99_RTT,$LATEST_LOG" >> "$RESULTS_FILE"
     
     echo -e "${GREEN}✓ Results recorded${NC}"
     echo ""
@@ -130,8 +146,11 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     echo "Quick Summary:"
     echo "  Service count: $SERVICE_COUNT"
     echo "  Worker position: $WORKER_POS / $TOTAL_RULES"
-    echo "  Mean latency: ${MEAN_LATENCY:-N/A} us"
-    echo "  Max latency: ${MAX_LATENCY:-N/A} us"
+    echo "  Mean RTT: ${MEAN_RTT:-N/A} µs"
+    echo "  Range: ${MIN_RTT:-N/A} - ${MAX_RTT:-N/A} µs"
+    echo "  P50: ${P50_RTT:-N/A} µs"
+    echo "  P95: ${P95_RTT:-N/A} µs"
+    echo "  P99: ${P99_RTT:-N/A} µs"
     echo ""
     
     # Pause between tests
@@ -152,7 +171,7 @@ echo -e "${BLUE}Cleaning up dummy services...${NC}"
 delete_dummy_services "$PROJECT_ROOT" || true
 echo ""
 
-echo -e "${GREEN}✓ Full experiment suite finished!${NC}"
+echo -e "${GREEN}✓ Full RTT experiment suite finished!${NC}"
 echo ""
 echo "Results Summary:"
 echo "=================="
@@ -161,7 +180,7 @@ echo ""
 echo -e "${CYAN}Detailed results saved to: $RESULTS_FILE${NC}"
 echo ""
 echo "Next steps:"
-echo "  1. Review individual log files for detailed distributions"
-echo "  2. Extract P50/P95/P99 from histograms if needed"
+echo "  1. Review individual log files for detailed statistics"
+echo "  2. Compare with eBPF one-way measurements"
 echo "  3. Generate graphs from CSV data"
 echo ""

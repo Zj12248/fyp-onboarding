@@ -28,7 +28,12 @@ This project measures the **pure kernel-level packet forwarding latency** in Kub
 │   ├── ebpf/                       # ⭐ PRIMARY: eBPF measurement tools
 │   │   ├── trace-kubeproxy.bt     # bpftrace script for kernel tracing
 │   │   ├── run-experiment.sh       # Automated eBPF + pktgen experiment
+│   │   ├── run-full-experiment.sh  # Full automation at multiple scales
+│   │   ├── common.sh               # Shared utility functions
 │   │   └── README.md               # Complete eBPF documentation
+│   │
+│   ├── rtt/                        # RTT measurement tools
+│   │   └── measure-rtt-hping3.sh   # Round-trip latency with conntrack bypass
 │   │
 │   ├── create-dummy-services/      # ⭐ Fast Go tool (6-10x faster)
 │   │   ├── main.go                 # Parallel service creation with EndpointSlices
@@ -243,7 +248,131 @@ column -t -s',' logs/ebpf/nftables_results.csv
 
 ---
 
-### Method 2: gRPC Load Generator (Legacy)
+### Method 2: RTT Measurement with hping3
+
+**Measures round-trip time (RTT) through kube-proxy with conntrack bypass.**
+
+This complements eBPF one-way measurements by providing end-to-end RTT including:
+- Outbound kube-proxy rule traversal
+- Network propagation to worker
+- Return path through kube-proxy
+- Network propagation back to sender
+
+#### Key Feature: Conntrack Bypass
+
+Each packet uses a **unique sequential source port** to create a unique 5-tuple, forcing:
+- Full kube-proxy rule traversal every time (no NAT cache hits)
+- Fresh connection state for each measurement
+- Realistic worst-case scenario for service discovery
+
+#### Quick Start
+
+```bash
+# Run full automated experiment suite (tests at 100, 1k, 5k, 10k, 20k, 30k services)
+sudo bash scripts/rtt/run-full-rtt-experiment.sh
+
+# View CSV results summary
+cat logs/rtt/rtt_experiment_summary_*.csv
+
+# View individual detailed logs
+ls -lt logs/rtt/
+```
+
+**What it does:**
+- Creates dummy services at multiple scales automatically
+- Runs RTT measurements at each scale
+- Extracts metrics (Min/Mean/Max/P50/P95/P99) to CSV
+- Cleans up between tests
+- ~60 minutes total runtime
+
+**Custom parameters:**
+```bash
+# Custom packet count (200) and warmup (20)
+sudo bash scripts/rtt/run-full-rtt-experiment.sh 200 20
+```
+
+#### Single Test Mode
+
+For testing at a specific service count:
+
+```bash
+# Single RTT measurement (default: 100 packets with 10 warmup)
+sudo bash scripts/rtt/measure-rtt-hping3.sh
+
+# Custom: 500 packets with 20 warmup
+sudo bash scripts/rtt/measure-rtt-hping3.sh 500 20
+
+# View results
+cat logs/rtt/rtt_iptables_*.log
+```
+
+#### Output Example
+
+```
+============================================
+  RTT Measurement with hping3
+============================================
+Kube-proxy mode: iptables
+Worker ClusterIP: 10.96.123.45
+Packet count: 100
+Warmup: 10 packets
+============================================
+
+Statistics (in microseconds):
+  Total measurements: 100
+  Min RTT:            125 µs (0.125 ms)
+  Mean RTT:           156 µs (0.156 ms)
+  Max RTT:            312 µs (0.312 ms)
+  
+Percentiles:
+  P50 (Median):       148 µs (0.148 ms)
+  P95:                198 µs (0.198 ms)
+  P99:                267 µs (0.267 ms)
+```
+
+#### Comparing RTT vs eBPF
+
+**Expected relationship:**
+```
+RTT ≈ 2 × eBPF_one-way + network_overhead
+```
+
+Example at 1000 services (iptables):
+- eBPF one-way: ~50µs
+- Expected RTT: ~100-120µs (2×50 + ~10-20µs overhead)
+- Actual RTT: ~130-150µs (includes network + processing)
+
+The RTT is typically slightly higher due to:
+- Network propagation delays (node-to-pod)
+- Worker processing time (minimal for echo service)
+- Additional kernel overhead for return path
+
+#### Use Cases
+
+1. **Validate eBPF measurements** - RTT should be ~2x one-way
+2. **End-to-end latency** - Including network and application layers
+3. **Conntrack bypass verification** - Confirm no caching benefits
+4. **Cross-mode comparison** - RTT differences between iptables/nftables
+
+#### Files Generated
+
+- `logs/rtt/rtt_<mode>_<timestamp>.log` - Summary statistics
+- `logs/rtt/rtt_<mode>_<timestamp>_raw.txt` - Raw RTT values (one per line in µs)
+
+**Tip:** Import raw data into Excel/Python for custom analysis:
+```bash
+# Calculate your own percentiles
+python3 << 'EOF'
+import numpy as np
+data = np.loadtxt('logs/rtt/rtt_iptables_*_raw.txt')
+print(f"P90: {np.percentile(data, 90):.0f} µs")
+print(f"P99.9: {np.percentile(data, 99.9):.0f} µs")
+EOF
+```
+
+---
+
+### Method 3: gRPC Load Generator (Legacy)
 
 **Measures end-to-end application latency (includes TCP, gRPC overhead).**
 
