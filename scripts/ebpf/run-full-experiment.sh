@@ -39,11 +39,6 @@ if ! check_prerequisites true true; then
     exit 1
 fi
 
-if ! command -v go &> /dev/null; then
-    echo -e "${RED}ERROR: go not found (needed for service creation)${NC}"
-    exit 1
-fi
-
 # Ensure worker is deployed
 WORKER_IP=$(ensure_worker_deployed "$PROJECT_ROOT")
 if [ -z "$WORKER_IP" ]; then
