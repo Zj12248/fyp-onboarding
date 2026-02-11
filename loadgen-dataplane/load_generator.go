@@ -4,16 +4,16 @@ package main
 // Single test mode:
 //   go run loadgen-dataplane/load_generator.go \
 //     --worker=<worker-ip>:50051 \
-//     --rps=50 \
-//     --num-requests=1000 \
+//     --rps=200 \
+//     --num-requests=10000 \
 //     --proxy-mode=iptables-nft \
 //     --service-count=10
 //
 // Full experiment mode:
 //   go run loadgen-dataplane/load_generator.go \
 //     --worker=<worker-ip>:50051 \
-//     --rps=50 \
-//     --num-requests=1000 \
+//     --rps=200 \
+//     --num-requests=10000 \
 //     --proxy-mode=iptables-nft \
 //     --full-experiment
 //
@@ -652,8 +652,8 @@ func main() {
 	fmt.Println("Data Plane Latency Test - gRPC Load Generator")
 
 	workerAddr := flag.String("worker", "localhost:50051", "Worker gRPC host:port")
-	rps := flag.Int("rps", 50, "Requests per second")
-	numRequests := flag.Int("num-requests", 1000, "Total number of requests to send")
+	rps := flag.Int("rps", 200, "Requests per second")
+	numRequests := flag.Int("num-requests", 10000, "Total number of requests to send")
 	proxyMode := flag.String("proxy-mode", "unknown", "Kube-proxy mode: iptables-nft or nftables")
 	serviceCount := flag.Int("service-count", 1, "Number of services in cluster (single test mode)")
 	fullExperiment := flag.Bool("full-experiment", false, "Run full experiment at multiple service counts (100/1k/5k/10k/20k)")

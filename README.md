@@ -372,29 +372,113 @@ EOF
 
 ---
 
-### Method 3: gRPC Load Generator (Legacy)
+### Method 3: gRPC Load Generator
 
-**Measures end-to-end application latency (includes TCP, gRPC overhead).**
+**Measures end-to-end application latency using actual gRPC requests.**
 
-<details>
-<summary>Click to expand legacy gRPC workflow</summary>
+This method provides **application-level RTT measurements** including:
+- Full TCP 3-way handshake
+- gRPC protocol overhead
+- Worker service processing time
+- Complete round-trip through kube-proxy
+
+**Key differences from eBPF:**
+- Measures at application layer (not kernel)
+- Uses worker pool (100 concurrent workers) for efficiency
+- Includes network + gRPC + worker processing overhead
+- Results are higher but more representative of real application behavior
+
+#### Quick Start (Full Experiment Mode)
 
 ```bash
 # Get worker ClusterIP
 WORKER_IP=$(kubectl get svc worker -o jsonpath='{.spec.clusterIP}')
 
-# Run load test
+# Run full automated experiment (100, 1k, 5k, 10k, 20k services)
 go run loadgen-dataplane/load_generator.go \
   --worker=$WORKER_IP:50051 \
-  --rps=50 \
-  --num-requests=2000 \
-  --proxy-mode=iptables \
-  --service-count=1000
+  --rps=200 \
+  --num-requests=10000 \
+  --proxy-mode=iptables-nft \
+  --full-experiment
+
+# View summary results
+cat logs/dataplane/experiment_summary_*.csv
 ```
 
-**Note:** This method includes application overhead and benefits from conntrack caching, making it less accurate for pure kube-proxy performance measurement.
+**What it does:**
+- Creates dummy services at multiple scales automatically
+- Runs gRPC load tests at each scale
+- Tracks worker position in iptables rules
+- Extracts metrics (Mean, P50, P95, P99) to CSV
+- Cleans up between tests
+- ~30-35 minutes total runtime (50 seconds per test)
 
-</details>
+#### Single Test Mode
+
+For testing at a specific service count:
+
+```bash
+WORKER_IP=$(kubectl get svc worker -o jsonpath='{.spec.clusterIP}')
+
+# Single test at current service count
+go run loadgen-dataplane/load_generator.go \
+  --worker=$WORKER_IP:50051 \
+  --rps=200 \
+  --num-requests=10000 \
+  --proxy-mode=iptables-nft \
+  --service-count=1000
+
+# View results
+ls -lt logs/dataplane/
+cat logs/dataplane/PM_iptables-nft_SC_1000_*.log
+```
+
+#### Output Files
+
+**Individual Test:**
+- `logs/dataplane/PM_<mode>_SC_<count>_RPS_<rps>_<timestamp>.log` - Statistics summary
+- `logs/dataplane/PM_<mode>_SC_<count>_RPS_<rps>_<timestamp>.csv` - Raw per-request data
+
+**Full Experiment:**
+- `logs/dataplane/experiment_summary_<timestamp>.csv` - Aggregated results
+
+#### CSV Format
+
+**Individual test CSV** includes metadata:
+```csv
+# ProxyMode: iptables-nft
+# ServiceCount: 1000
+# WorkerPosition: 42
+# TotalRules: 1523
+# RPS: 200
+# NumRequests: 10000
+seq,rtt_us,data_plane_latency_us,worker_processing_us
+0,523.45,245.67,32.11
+1,525.32,246.21,33.90
+...
+```
+
+**Summary CSV** format:
+```csv
+ServiceCount,ProxyMode,WorkerPosition,TotalRules,NumRequests,SuccessRate,MeanLatency_us,P50_us,P95_us,P99_us,RTTMean_us,RTTP95_us,RTTP99_us,LogFile
+```
+
+#### Understanding the Metrics
+
+- **RTT (rtt_us)**: Total round-trip time including all overhead
+- **Data Plane Latency (data_plane_latency_us)**: One-way network latency = (RTT - WorkerProcessing) / 2
+- **Worker Processing (worker_processing_us)**: Time worker spent processing request
+- **Worker Position**: Position in iptables KUBE-SERVICES chain (affects iptables latency)
+
+#### Use Cases
+
+1. **Application-level validation** - Confirms end-to-end behavior
+2. **Compare with eBPF** - Should be higher due to protocol overhead
+3. **Worker position correlation** - Verify iptables O(n) at application layer
+4. **Real-world scenarios** - Includes all actual overhead applications see
+
+**Note:** Results are higher than eBPF measurements due to TCP/gRPC overhead. Use eBPF for pure kernel-level kube-proxy performance.
 
 ---
 
