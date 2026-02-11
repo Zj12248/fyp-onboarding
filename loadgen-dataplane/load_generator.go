@@ -460,7 +460,7 @@ func RunFullExperiment(config TestConfig) {
 		}
 
 		// Run test and capture results
-		results := runTestAndGetResults(client, testConfig)
+		results := runTestAndGetResults(client, testConfig, currentWorkerPosition, currentTotalRules)
 
 		if len(results) == 0 {
 			fmt.Printf("ERROR: No results for %d services\n", serviceCount)
@@ -522,7 +522,7 @@ func RunFullExperiment(config TestConfig) {
 	fmt.Println(string(data))
 }
 
-func runTestAndGetResults(client pb.WorkerServiceClient, config TestConfig) []requestResult {
+func runTestAndGetResults(client pb.WorkerServiceClient, config TestConfig, workerPosition int, totalRules int) []requestResult {
 	// Create individual test log/CSV
 	timestamp := time.Now().Format("20060102_150405")
 	runID := fmt.Sprintf("PM_%s_SC_%d_RPS_%d_%s",
@@ -541,6 +541,7 @@ func runTestAndGetResults(client pb.WorkerServiceClient, config TestConfig) []re
 
 	logger.Printf("Test Configuration: ProxyMode=%s, ServiceCount=%d, NumRequests=%d, RPS=%d",
 		config.ProxyMode, config.ServiceCount, config.NumRequests, config.RPS)
+	logger.Printf("Worker Position: %d / %d", workerPosition, totalRules)
 
 	csvF, err := os.Create(csvFile)
 	if err != nil {
@@ -548,6 +549,13 @@ func runTestAndGetResults(client pb.WorkerServiceClient, config TestConfig) []re
 		return nil
 	}
 	defer csvF.Close()
+	// CSV header with metadata as comments
+	fmt.Fprintf(csvF, "# ProxyMode: %s\n", config.ProxyMode)
+	fmt.Fprintf(csvF, "# ServiceCount: %d\n", config.ServiceCount)
+	fmt.Fprintf(csvF, "# WorkerPosition: %d\n", workerPosition)
+	fmt.Fprintf(csvF, "# TotalRules: %d\n", totalRules)
+	fmt.Fprintf(csvF, "# RPS: %d\n", config.RPS)
+	fmt.Fprintf(csvF, "# NumRequests: %d\n", config.NumRequests)
 	fmt.Fprintf(csvF, "seq,rtt_us,data_plane_latency_us,worker_processing_us\n")
 
 	var results []requestResult
