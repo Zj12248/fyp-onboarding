@@ -119,7 +119,7 @@ if [ "$WARMUP_COUNT" -gt 0 ]; then
     
     SRC_PORT=10000
     for i in $(seq 1 $WARMUP_COUNT); do
-        hping3 -2 -p 50051 -s $SRC_PORT -c 1 $WORKER_IP > /dev/null 2>&1 || true
+        hping3 -S -p 50051 -s $SRC_PORT -c 1 $WORKER_IP > /dev/null 2>&1 || true
         SRC_PORT=$((SRC_PORT + 1))
     done
     
@@ -133,6 +133,7 @@ fi
 
 echo "Starting RTT measurements..."
 echo "Each packet uses a unique sequential source port to bypass conntrack"
+echo "Target: $WORKER_IP:50051, Starting port: 25000"
 echo ""
 
 # Array to store RTT values
@@ -141,11 +142,31 @@ declare -a rtt_values
 # Start at port 25000 for actual measurements
 SRC_PORT=25000
 
+echo "Sending packet 1..."
 for i in $(seq 1 $PACKET_COUNT); do
     
-    # Send single packet and capture RTT
-    # hping3 output format: "rtt=X.Y ms"
-    OUTPUT=$(hping3 -2 -p 50051 -s $SRC_PORT -c 1 $WORKER_IP 2>&1)
+    echo "DEBUG: About to send packet $i from port $SRC_PORT to $WORKER_IP:50051" >&2
+    
+    # Send single packet and capture RTT with timeout
+    # hping3 TCP SYN mode for gRPC service
+    set +e  # Don't exit on error
+    OUTPUT=$(timeout 5 hping3 -S -p 50051 -s $SRC_PORT -c 1 $WORKER_IP 2>&1)
+    EXIT_CODE=$?
+    set -e
+    
+    echo "DEBUG: hping3 returned with exit code $EXIT_CODE" >&2
+    
+    # Check if command timed out or failed
+    if [ $EXIT_CODE -eq 124 ]; then
+        echo "Warning: Timeout for packet $i (port $SRC_PORT)" >&2
+        SRC_PORT=$((SRC_PORT + 1))
+        continue
+    elif [ $EXIT_CODE -ne 0 ]; then
+        echo "Warning: hping3 failed for packet $i (port $SRC_PORT, exit code: $EXIT_CODE)" >&2
+        echo "Output: $OUTPUT" >&2
+        SRC_PORT=$((SRC_PORT + 1))
+        continue
+    fi
     
     # Extract RTT in milliseconds
     RTT=$(echo "$OUTPUT" | grep -oP 'rtt=\K[0-9.]+' || echo "")
