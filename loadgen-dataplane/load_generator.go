@@ -318,7 +318,9 @@ type TestConfig struct {
 // ---------------- Service Management ----------------
 func createDummyServices(count int, projectRoot string) error {
 	fmt.Printf("Creating %d dummy services...\n", count)
-	cmd := exec.Command("go", "run", filepath.Join(projectRoot, "scripts/create-dummy-services/main.go"), strconv.Itoa(count))
+	scriptDir := filepath.Join(projectRoot, "scripts/create-dummy-services")
+	cmd := exec.Command("go", "run", "main.go", strconv.Itoa(count))
+	cmd.Dir = scriptDir // Run from the script directory so go.mod is found
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -326,7 +328,9 @@ func createDummyServices(count int, projectRoot string) error {
 
 func deleteDummyServices(projectRoot string) error {
 	fmt.Println("Deleting all dummy services...")
-	cmd := exec.Command("go", "run", filepath.Join(projectRoot, "scripts/delete-dummy-services/main.go"))
+	scriptDir := filepath.Join(projectRoot, "scripts/delete-dummy-services")
+	cmd := exec.Command("go", "run", "main.go")
+	cmd.Dir = scriptDir // Run from the script directory so go.mod is found
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
