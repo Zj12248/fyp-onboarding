@@ -41,13 +41,19 @@ kretprobe:ipt_do_table
     // Linear histogram for detailed distribution (0-100us in 5us buckets)
     @ipt_latency_linear = lhist($duration_us, 0, 100, 5);
     
+    // Store values for percentile calculation (P50, P95, P99)
+    @ipt_values = hist($duration_us);
+    
     // Count total invocations
     @iptables_count++;
     
-    // Track min/max/avg
+    // Track min/max/avg/sum for statistics
     @ipt_min_us = min($duration_us);
     @ipt_max_us = max($duration_us);
     @ipt_sum_us = sum($duration_us);
+    
+    // Sum of squares for standard deviation
+    @ipt_sum_sq = sum($duration_us * $duration_us);
     
     // Sample slow operations (>50us)
     if ($duration_us > 50) {
@@ -81,13 +87,19 @@ kretprobe:nft_do_chain
     // Linear histogram for detailed distribution
     @nft_latency_linear = lhist($duration_us, 0, 100, 5);
     
+    // Store values for percentile calculation
+    @nft_values = hist($duration_us);
+    
     // Count total invocations
     @nftables_count++;
     
-    // Track min/max/avg
+    // Track min/max/avg/sum for statistics
     @nft_min_us = min($duration_us);
     @nft_max_us = max($duration_us);
     @nft_sum_us = sum($duration_us);
+    
+    // Sum of squares for standard deviation
+    @nft_sum_sq = sum($duration_us * $duration_us);
     
     // Sample slow operations (>50us)
     if ($duration_us > 50) {
@@ -109,14 +121,18 @@ interval:s:5
     
     if (@iptables_count > 0) {
         $ipt_avg = @ipt_sum_us / @iptables_count;
-        printf("  [iptables] Count: %d, Min: %d us, Avg: %d us, Max: %d us\n",
-               @iptables_count, @ipt_min_us, $ipt_avg, @ipt_max_us);
+        $ipt_variance = (@ipt_sum_sq / @iptables_count) - ($ipt_avg * $ipt_avg);
+        $ipt_stddev = $ipt_variance > 0 ? sqrt($ipt_variance) : 0;
+        printf("  [iptables] Count: %d, Min: %d us, Avg: %d us, Max: %d us, StdDev: %d us\n",
+               @iptables_count, @ipt_min_us, $ipt_avg, @ipt_max_us, $ipt_stddev);
     }
     
     if (@nftables_count > 0) {
         $nft_avg = @nft_sum_us / @nftables_count;
-        printf("  [nftables] Count: %d, Min: %d us, Avg: %d us, Max: %d us\n",
-               @nftables_count, @nft_min_us, $nft_avg, @nft_max_us);
+        $nft_variance = (@nft_sum_sq / @nftables_count) - ($nft_avg * $nft_avg);
+        $nft_stddev = $nft_variance > 0 ? sqrt($nft_variance) : 0;
+        printf("  [nftables] Count: %d, Min: %d us, Avg: %d us, Max: %d us, StdDev: %d us\n",
+               @nftables_count, @nft_min_us, $nft_avg, @nft_max_us, $nft_stddev);
     }
     
     if (@iptables_count == 0 && @nftables_count == 0) {
@@ -137,17 +153,30 @@ END
     // IPTABLES RESULTS
     if (@iptables_count > 0) {
         $ipt_avg = @ipt_sum_us / @iptables_count;
+        $ipt_variance = (@ipt_sum_sq / @iptables_count) - ($ipt_avg * $ipt_avg);
+        $ipt_stddev = $ipt_variance > 0 ? sqrt($ipt_variance) : 0;
+        
         printf("--- IPTABLES MODE ---\n");
         printf("Total invocations: %d\n", @iptables_count);
-        printf("Min latency: %d us\n", @ipt_min_us);
-        printf("Avg latency: %d us\n", $ipt_avg);
-        printf("Max latency: %d us\n\n", @ipt_max_us);
+        printf("\nBasic Statistics:\n");
+        printf("  Min latency:    %d us\n", @ipt_min_us);
+        printf("  Mean latency:   %d us\n", $ipt_avg);
+        printf("  Max latency:    %d us\n", @ipt_max_us);
+        printf("  Std deviation:  %d us\n", $ipt_stddev);
         
-        printf("Latency distribution (logarithmic buckets):\n");
+        printf("\nPercentiles (from histogram):\n");
+        printf("  P50 (median):   ~");
+        print(@ipt_latency_us, 50);
+        printf("  P95:            ~");
+        print(@ipt_latency_us, 95);
+        printf("  P99:            ~");
+        print(@ipt_latency_us, 99);
+        
+        printf("\nLatency Distribution (logarithmic buckets):\n");
         print(@ipt_latency_us);
         printf("\n");
         
-        printf("Latency distribution (linear 0-100us, 5us buckets):\n");
+        printf("Latency Distribution (linear 0-100us, 5us buckets):\n");
         print(@ipt_latency_linear);
         printf("\n");
     } else {
@@ -158,17 +187,30 @@ END
     // NFTABLES RESULTS
     if (@nftables_count > 0) {
         $nft_avg = @nft_sum_us / @nftables_count;
+        $nft_variance = (@nft_sum_sq / @nftables_count) - ($nft_avg * $nft_avg);
+        $nft_stddev = $nft_variance > 0 ? sqrt($nft_variance) : 0;
+        
         printf("--- NFTABLES MODE ---\n");
         printf("Total invocations: %d\n", @nftables_count);
-        printf("Min latency: %d us\n", @nft_min_us);
-        printf("Avg latency: %d us\n", $nft_avg);
-        printf("Max latency: %d us\n\n", @nft_max_us);
+        printf("\nBasic Statistics:\n");
+        printf("  Min latency:    %d us\n", @nft_min_us);
+        printf("  Mean latency:   %d us\n", $nft_avg);
+        printf("  Max latency:    %d us\n", @nft_max_us);
+        printf("  Std deviation:  %d us\n", $nft_stddev);
         
-        printf("Latency distribution (logarithmic buckets):\n");
+        printf("\nPercentiles (from histogram):\n");
+        printf("  P50 (median):   ~");
+        print(@nft_latency_us, 50);
+        printf("  P95:            ~");
+        print(@nft_latency_us, 95);
+        printf("  P99:            ~");
+        print(@nft_latency_us, 99);
+        
+        printf("\nLatency Distribution (logarithmic buckets):\n");
         print(@nft_latency_us);
         printf("\n");
         
-        printf("Latency distribution (linear 0-100us, 5us buckets):\n");
+        printf("Latency Distribution (linear 0-100us, 5us buckets):\n");
         print(@nft_latency_linear);
         printf("\n");
     } else {

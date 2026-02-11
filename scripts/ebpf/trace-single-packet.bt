@@ -1,0 +1,85 @@
+#!/usr/bin/env bpftrace
+/*
+ * Trace single packet through kube-proxy after system warmup
+ * Measures one packet latency with nanosecond precision
+ * 
+ * Usage: sudo bpftrace trace-single-packet.bt
+ */
+
+BEGIN
+{
+    printf("====================================================\n");
+    printf("  Single Packet Latency Tracer (Post-Warmup)\n");
+    printf("====================================================\n");
+    printf("Waiting for ONE packet to trace...\n\n");
+    
+    @measured = 0;
+}
+
+/* ========================================
+ * IPTABLES MODE TRACING
+ * ======================================== */
+
+kprobe:ipt_do_table
+/@measured == 0/
+{
+    @ipt_start[tid] = nsecs;
+}
+
+kretprobe:ipt_do_table
+/@ipt_start[tid] && @measured == 0/
+{
+    $duration_ns = nsecs - @ipt_start[tid];
+    $duration_us = $duration_ns / 1000;
+    
+    printf("[iptables] Latency: %d.%03d µs (%d ns)\n", 
+           $duration_us, $duration_ns % 1000, $duration_ns);
+    
+    @measured = 1;
+    delete(@ipt_start[tid]);
+    exit();
+}
+
+/* ========================================
+ * NFTABLES MODE TRACING
+ * ======================================== */
+
+kprobe:nft_do_chain
+/@measured == 0/
+{
+    @nft_start[tid] = nsecs;
+}
+
+kretprobe:nft_do_chain
+/@nft_start[tid] && @measured == 0/
+{
+    $duration_ns = nsecs - @nft_start[tid];
+    $duration_us = $duration_ns / 1000;
+    
+    printf("[nftables] Latency: %d.%03d µs (%d ns)\n", 
+           $duration_us, $duration_ns % 1000, $duration_ns);
+    
+    @measured = 1;
+    delete(@nft_start[tid]);
+    exit();
+}
+
+/* ========================================
+ * TIMEOUT PROTECTION
+ * ======================================== */
+
+interval:s:10
+{
+    if (@measured == 0) {
+        printf("\nERROR: No packet traced after 10 seconds.\n");
+        printf("Make sure traffic is being sent to the worker service.\n");
+        exit();
+    }
+}
+
+END
+{
+    clear(@ipt_start);
+    clear(@nft_start);
+    clear(@measured);
+}
