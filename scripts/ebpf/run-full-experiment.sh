@@ -61,46 +61,56 @@ echo -e "${GREEN}Results will be saved to: $RESULTS_FILE${NC}"
 echo ""
 
 # ========================================
+# Initial Cleanup
+# ========================================
+
+echo -e "${BLUE}[Initial] Cleaning up all existing dummy services...${NC}"
+delete_dummy_services "$PROJECT_ROOT" || true
+sleep 30
+echo -e "${GREEN}✓ Starting with clean state${NC}"
+echo ""
+
+# Track current service count
+CURRENT_SERVICE_COUNT=0
+
+# ========================================
 # Main Experiment Loop
 # ========================================
 
 for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     print_experiment_header "Testing with $SERVICE_COUNT services"
     
-    # Step 1: Delete existing dummy services
-    echo -e "${BLUE}[1/5] Cleaning up existing dummy services...${NC}"
-    delete_dummy_services "$PROJECT_ROOT" || true
-    sleep 30
-    echo -e "${GREEN}✓ Cleanup complete${NC}"
-    echo ""
+    # Calculate how many services to add
+    SERVICES_TO_ADD=$((SERVICE_COUNT - CURRENT_SERVICE_COUNT))
     
-    # Step 2: Create dummy services
-    echo -e "${BLUE}[2/5] Creating $SERVICE_COUNT dummy services...${NC}"
-    START_TIME=$(date +%s)
-    if ! create_dummy_services "$SERVICE_COUNT" "$PROJECT_ROOT"; then
-        echo -e "${RED}✗ Failed to create services${NC}"
-        continue
+    if [ $SERVICES_TO_ADD -gt 0 ]; then
+        # Step 1: Create additional dummy services
+        echo -e "${BLUE}[1/4] Creating $SERVICES_TO_ADD additional dummy services (total: $SERVICE_COUNT)...${NC}"
+        START_TIME=$(date +%s)
+        if ! create_dummy_services "$SERVICES_TO_ADD" "$PROJECT_ROOT"; then
+            echo -e "${RED}✗ Failed to create services${NC}"
+            continue
+        fi
+        CREATE_DURATION=$(($(date +%s) - START_TIME))
+        echo -e "${GREEN}✓ Created $SERVICES_TO_ADD services in ${CREATE_DURATION}s${NC}"
+        CURRENT_SERVICE_COUNT=$SERVICE_COUNT
+        echo ""
+        
+        # Step 2: Wait for kube-proxy sync
+        echo -e "${BLUE}[2/4] Waiting for kube-proxy to sync rules (120s)...${NC}"
+        wait_for_kubeproxy_sync 120
+    else
+        echo -e "${YELLOW}Already at $SERVICE_COUNT services, skipping creation${NC}"
+        echo ""
     fi
-    CREATE_DURATION=$(($(date +%s) - START_TIME))
-    echo -e "${GREEN}✓ Created $SERVICE_COUNT services in ${CREATE_DURATION}s${NC}"
-    echo ""
-    
-    # Step 3: Wait for kube-proxy sync
-    echo -e "${BLUE}[3/5] Waiting for kube-proxy to sync rules (120s)...${NC}"
-    wait_for_kubeproxy_sync 120
     
     # Verify service count
     ACTUAL_COUNT=$(get_dummy_service_count)
     echo -e "${GREEN}✓ Verified: $ACTUAL_COUNT dummy services + worker${NC}"
     echo ""
     
-    # Step 4: Verify setup
-    echo -e "${BLUE}[4/5] Verifying setup...${NC}"
-    bash "$PROJECT_ROOT/scripts/verify-setup.sh" || true
-    echo ""
-    
-    # Step 5: Run eBPF experiment
-    echo -e "${BLUE}[5/5] Running eBPF measurement...${NC}"
+    # Step 3: Run eBPF experiment
+    echo -e "${BLUE}[3/4] Running eBPF measurement...${NC}"
     bash "$SCRIPT_DIR/run-experiment.sh" $DURATION $PACKET_RATE $WARMUP_PACKETS
     
     # Find the most recent log file

@@ -72,41 +72,56 @@ echo -e "${GREEN}Results will be saved to: $RESULTS_FILE${NC}"
 echo ""
 
 # ========================================
+# Initial Cleanup
+# ========================================
+
+echo -e "${BLUE}[Initial] Cleaning up all existing dummy services...${NC}"
+delete_dummy_services "$PROJECT_ROOT" || true
+sleep 30
+echo -e "${GREEN}✓ Starting with clean state${NC}"
+echo ""
+
+# Track current service count
+CURRENT_SERVICE_COUNT=0
+
+# ========================================
 # Main Experiment Loop
 # ========================================
 
 for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     print_experiment_header "Testing with $SERVICE_COUNT services"
     
-    # Step 1: Delete existing dummy services
-    echo -e "${BLUE}[1/5] Cleaning up existing dummy services...${NC}"
-    delete_dummy_services "$PROJECT_ROOT" || true
-    sleep 30
-    echo -e "${GREEN}✓ Cleanup complete${NC}"
-    echo ""
+    # Calculate how many services to add
+    SERVICES_TO_ADD=$((SERVICE_COUNT - CURRENT_SERVICE_COUNT))
     
-    # Step 2: Create dummy services
-    echo -e "${BLUE}[2/5] Creating $SERVICE_COUNT dummy services...${NC}"
-    START_TIME=$(date +%s)
-    if ! create_dummy_services "$SERVICE_COUNT" "$PROJECT_ROOT"; then
-        echo -e "${RED}✗ Failed to create services${NC}"
-        continue
+    if [ $SERVICES_TO_ADD -gt 0 ]; then
+        # Step 1: Create additional dummy services
+        echo -e "${BLUE}[1/4] Creating $SERVICES_TO_ADD additional dummy services (total: $SERVICE_COUNT)...${NC}"
+        START_TIME=$(date +%s)
+        if ! create_dummy_services "$SERVICES_TO_ADD" "$PROJECT_ROOT"; then
+            echo -e "${RED}✗ Failed to create services${NC}"
+            continue
+        fi
+        CREATE_DURATION=$(($(date +%s) - START_TIME))
+        echo -e "${GREEN}✓ Created $SERVICES_TO_ADD services in ${CREATE_DURATION}s${NC}"
+        CURRENT_SERVICE_COUNT=$SERVICE_COUNT
+        echo ""
+        
+        # Step 2: Wait for kube-proxy sync
+        echo -e "${BLUE}[2/4] Waiting for kube-proxy to sync rules (120s)...${NC}"
+        wait_for_kubeproxy_sync 120
+    else
+        echo -e "${YELLOW}Already at $SERVICE_COUNT services, skipping creation${NC}"
+        echo ""
     fi
-    CREATE_DURATION=$(($(date +%s) - START_TIME))
-    echo -e "${GREEN}✓ Created $SERVICE_COUNT services in ${CREATE_DURATION}s${NC}"
-    echo ""
-    
-    # Step 3: Wait for kube-proxy sync
-    echo -e "${BLUE}[3/5] Waiting for kube-proxy to sync rules (120s)...${NC}"
-    wait_for_kubeproxy_sync 120
     
     # Verify service count
     ACTUAL_COUNT=$(get_dummy_service_count)
     echo -e "${GREEN}✓ Verified: $ACTUAL_COUNT dummy services + worker${NC}"
     echo ""
     
-    # Step 4: Get worker position
-    echo -e "${BLUE}[4/5] Checking worker position...${NC}"
+    # Step 3: Get worker position
+    echo -e "${BLUE}[3/4] Checking worker position...${NC}"
     if [ "$PROXY_MODE" = "iptables" ]; then
         WORKER_POS=$(sudo iptables -t nat -L KUBE-SERVICES --line-numbers -n | grep "$WORKER_IP" | grep "dpt:50051" | head -1 | awk '{print $1}')
         TOTAL_RULES=$(sudo iptables -t nat -L KUBE-SERVICES --line-numbers -n | tail -n +3 | wc -l)
@@ -117,8 +132,8 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     echo -e "${GREEN}✓ Worker position: $WORKER_POS / $TOTAL_RULES${NC}"
     echo ""
     
-    # Step 5: Run RTT measurement
-    echo -e "${BLUE}[5/5] Running RTT measurement...${NC}"
+    # Step 4: Run RTT measurement
+    echo -e "${BLUE}[4/4] Running RTT measurement...${NC}"
     bash "$SCRIPT_DIR/measure-rtt-hping3.sh" $PACKET_COUNT $WARMUP_COUNT
     
     # Find the most recent log file
