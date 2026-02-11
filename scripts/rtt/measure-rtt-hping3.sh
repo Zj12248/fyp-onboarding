@@ -18,8 +18,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUTPUT_DIR="$PROJECT_ROOT/logs/rtt"
 
-# Source common functions
-source "$SCRIPT_DIR/common.sh"
+# Source common functions from ebpf directory
+source "$SCRIPT_DIR/../ebpf/common.sh"
 
 echo "=============================================="
 echo "  RTT Measurement with hping3"
