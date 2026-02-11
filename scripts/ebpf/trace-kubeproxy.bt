@@ -35,31 +35,19 @@ kretprobe:ipt_do_table
     $duration_ns = nsecs - @ipt_start[tid];
     $duration_us = $duration_ns / 1000;
     
-    // Histogram of latency in microseconds (buckets: 1, 2, 4, 8, 16, 32, 64, 128...)
+    // Histogram of latency in microseconds
     @ipt_latency_us = hist($duration_us);
-    
-    // Linear histogram for detailed distribution (0-100us in 5us buckets)
-    @ipt_latency_linear = lhist($duration_us, 0, 100, 5);
-    
-    // Store values for percentile calculation (P50, P95, P99)
-    @ipt_values = hist($duration_us);
     
     // Count total invocations
     @iptables_count++;
     
-    // Track min/max/avg/sum for statistics
+    // Track min/max/sum for statistics
     @ipt_min_us = min($duration_us);
     @ipt_max_us = max($duration_us);
     @ipt_sum_us = sum($duration_us);
     
     // Sum of squares for standard deviation
     @ipt_sum_sq = sum($duration_us * $duration_us);
-    
-    // Sample slow operations (>50us)
-    if ($duration_us > 50) {
-        time("%H:%M:%S ");
-        printf("SLOW iptables: %d us (tid=%d)\n", $duration_us, tid);
-    }
     
     delete(@ipt_start[tid]);
 }
@@ -84,28 +72,16 @@ kretprobe:nft_do_chain
     // Histogram of latency in microseconds
     @nft_latency_us = hist($duration_us);
     
-    // Linear histogram for detailed distribution
-    @nft_latency_linear = lhist($duration_us, 0, 100, 5);
-    
-    // Store values for percentile calculation
-    @nft_values = hist($duration_us);
-    
     // Count total invocations
     @nftables_count++;
     
-    // Track min/max/avg/sum for statistics
+    // Track min/max/sum for statistics
     @nft_min_us = min($duration_us);
     @nft_max_us = max($duration_us);
     @nft_sum_us = sum($duration_us);
     
     // Sum of squares for standard deviation
     @nft_sum_sq = sum($duration_us * $duration_us);
-    
-    // Sample slow operations (>50us)
-    if ($duration_us > 50) {
-        time("%H:%M:%S ");
-        printf("SLOW nftables: %d us (tid=%d)\n", $duration_us, tid);
-    }
     
     delete(@nft_start[tid]);
 }
@@ -164,20 +140,8 @@ END
         printf("  Max latency:    %d us\n", @ipt_max_us);
         printf("  Std deviation:  %d us\n", $ipt_stddev);
         
-        printf("\nPercentiles (from histogram):\n");
-        printf("  P50 (median):   ~");
-        print(@ipt_latency_us, 50);
-        printf("  P95:            ~");
-        print(@ipt_latency_us, 95);
-        printf("  P99:            ~");
-        print(@ipt_latency_us, 99);
-        
-        printf("\nLatency Distribution (logarithmic buckets):\n");
+        printf("\nLatency Distribution (microseconds):\n");
         print(@ipt_latency_us);
-        printf("\n");
-        
-        printf("Latency Distribution (linear 0-100us, 5us buckets):\n");
-        print(@ipt_latency_linear);
         printf("\n");
     } else {
         printf("--- IPTABLES MODE ---\n");
@@ -198,29 +162,31 @@ END
         printf("  Max latency:    %d us\n", @nft_max_us);
         printf("  Std deviation:  %d us\n", $nft_stddev);
         
-        printf("\nPercentiles (from histogram):\n");
-        printf("  P50 (median):   ~");
-        print(@nft_latency_us, 50);
-        printf("  P95:            ~");
-        print(@nft_latency_us, 95);
-        printf("  P99:            ~");
-        print(@nft_latency_us, 99);
-        
-        printf("\nLatency Distribution (logarithmic buckets):\n");
+        printf("\nLatency Distribution (microseconds):\n");
         print(@nft_latency_us);
-        printf("\n");
-        
-        printf("Latency Distribution (linear 0-100us, 5us buckets):\n");
-        print(@nft_latency_linear);
         printf("\n");
     } else {
         printf("--- NFTABLES MODE ---\n");
         printf("No nftables traffic observed.\n\n");
     }
     
+    // ERROR MESSAGING
+    if (@iptables_count == 0 && @nftables_count == 0) {
+        printf("====================================================\n");
+        printf("  WARNING: No traffic detected!\n");
+        printf("====================================================\n");
+        printf("\nPossible reasons:\n");
+        printf("1. No traffic was flowing to Services during trace\n");
+        printf("2. Kernel symbols missing - check: cat /proc/kallsyms | grep -E 'ipt_do_table|nft_do_chain'\n");
+        printf("3. pktgen not sending packets to worker service\n");
+        printf("4. Kube-proxy not processing traffic\n\n");
+    }
+    
     // COMPARISON
     if (@iptables_count > 0 && @nftables_count > 0) {
-        printf("WARNING: Both iptables and nftables traffic detected!\n");
+        printf("====================================================\n");
+        printf("  WARNING: Both iptables and nftables traffic detected!\n");
+        printf("====================================================\n");
         printf("This is unusual - kube-proxy should use only one mode.\n\n");
     }
     
@@ -231,6 +197,14 @@ END
     clear(@nft_start);
     clear(@ipt_latency_us);
     clear(@nft_latency_us);
-    clear(@ipt_latency_linear);
-    clear(@nft_latency_linear);
+    clear(@iptables_count);
+    clear(@nftables_count);
+    clear(@ipt_sum_us);
+    clear(@ipt_sum_sq);
+    clear(@ipt_min_us);
+    clear(@ipt_max_us);
+    clear(@nft_sum_us);
+    clear(@nft_sum_sq);
+    clear(@nft_min_us);
+    clear(@nft_max_us);
 }

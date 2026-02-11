@@ -147,71 +147,76 @@ bpftrace --version
 #### Quick Start
 
 ```bash
-# 1. Create dummy services (fast Go tool)
-cd scripts/create-dummy-services
-go run main.go -count 1000
-cd ../..
+# Run full automated experiment suite (tests at 100, 1k, 5k, 10k, 20k services)
+sudo bash scripts/ebpf/run-full-experiment.sh
 
-# 2. Wait for kube-proxy to sync rules
-sleep 60
+# View CSV results summary
+cat logs/ebpf/experiment_summary_*.csv
 
-# 3. Run eBPF measurement (30s duration, 10k pps)
-sudo bash scripts/ebpf/run-experiment.sh 30 10000
-
-# 4. View results
-cat logs/ebpf/ebpf_iptables_*.log
+# View individual detailed logs
+ls -lt logs/ebpf/
 ```
 
-#### Full Experimental Workflow
+**What it does:**
+- Creates dummy services at multiple scales automatically
+- Runs eBPF measurements at each scale
+- Extracts metrics to CSV for easy graphing
+- Cleans up between tests
+- ~25-30 minutes total runtime
+
+**Custom parameters:**
+```bash
+# Custom duration (60s per test) and packet rate
+sudo bash scripts/ebpf/run-full-experiment.sh 60 10000 100
+#                                            ^   ^     ^
+#                                         duration rate warmup
+```
+
+#### Analyzing Results
 
 ```bash
-#!/bin/bash
-# Measure latency at different scales
+# View summary CSV (easily import into Excel/Python)
+column -t -s',' logs/ebpf/experiment_summary_*.csv
 
-for count in 100 500 1000 5000 10000; do
-  echo "=========================================="
-  echo "Testing with $count services"
-  echo "=========================================="
-  
-  # Create services with Go tool (fast)
-  cd scripts/create-dummy-services
-  go run main.go -count $count
-  cd ../..
-  
-  # Wait for kube-proxy sync
-  sleep 120
-  
-  # Verify setup
-  bash scripts/verify-setup.sh
-  
-  # Run eBPF experiment
-  sudo bash scripts/ebpf/run-experiment.sh 30 10000
-  
-  # Extract average latency
-  LOG_FILE=$(ls -t logs/ebpf/*.log | head -1)
-  AVG=$(grep "Avg latency:" $LOG_FILE | awk '{print $3}')
-  echo "Result: $count services → $AVG µs"
-  
-  # Cleanup for next iteration
-  cd scripts/delete-dummy-services
-  go run main.go
-  cd ../..
-  sleep 60
-done
+# Extract specific metrics
+CSV_FILE=$(ls -t logs/ebpf/experiment_summary_*.csv | head -1)
+echo "Service Count vs Max Latency:"
+awk -F',' 'NR>1 {print $1 " services → " $9 " µs"}' $CSV_FILE
+
+# Plot with Python (if pandas/matplotlib installed)
+python3 << 'EOF'
+import pandas as pd
+import matplotlib.pyplot as plt
+
+df = pd.read_csv('logs/ebpf/experiment_summary_*.csv')
+plt.figure(figsize=(10, 6))
+plt.plot(df['ServiceCount'], df['MaxLatency_us'], marker='o', label='Max (P100)')
+plt.plot(df['ServiceCount'], df['MeanLatency_us'], marker='s', label='Mean')
+plt.xlabel('Service Count')
+plt.ylabel('Latency (µs)')
+plt.title('Kube-Proxy Latency vs Scale')
+plt.legend()
+plt.grid(True)
+plt.savefig('latency_vs_services.png')
+print("Saved plot to latency_vs_services.png")
+EOF
 ```
 
 #### Compare iptables vs nftables
 
 ```bash
-# Test with iptables mode
+# Test iptables mode
 kubectl -n kube-system edit cm kube-proxy
 # Set: mode: "iptables"
 kubectl -n kube-system delete pods -l k8s-app=kube-proxy
 kubectl -n kube-system wait --for=condition=Ready pod -l k8s-app=kube-proxy
 sleep 60
 
-# Run experiment
-sudo bash scripts/ebpf/run-experiment.sh 60 10000
+# Run full experiment (~25 min)
+sudo bash scripts/ebpf/run-full-experiment.sh
+
+# Save results
+mv logs/ebpf/experiment_summary_*.csv logs/ebpf/iptables_results.csv
 
 # Switch to nftables mode
 kubectl -n kube-system edit cm kube-proxy
@@ -220,8 +225,18 @@ kubectl -n kube-system delete pods -l k8s-app=kube-proxy
 kubectl -n kube-system wait --for=condition=Ready pod -l k8s-app=kube-proxy
 sleep 60
 
-# Run experiment again
-sudo bash scripts/ebpf/run-experiment.sh 60 10000
+# Run full experiment again
+sudo bash scripts/ebpf/run-full-experiment.sh
+
+# Save results
+mv logs/ebpf/experiment_summary_*.csv logs/ebpf/nftables_results.csv
+
+# Compare side-by-side
+echo "=== iptables ==="
+column -t -s',' logs/ebpf/iptables_results.csv
+echo ""
+echo "=== nftables ==="
+column -t -s',' logs/ebpf/nftables_results.csv
 ```
 
 **See [scripts/ebpf/README.md](scripts/ebpf/README.md) for complete eBPF documentation.**
