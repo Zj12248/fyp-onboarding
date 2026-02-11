@@ -119,11 +119,10 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     MEAN_LATENCY=$(extract_metric_from_log "$LATEST_LOG" "Mean latency:")
     MIN_LATENCY=$(extract_metric_from_log "$LATEST_LOG" "Min latency:")
     MAX_LATENCY=$(extract_metric_from_log "$LATEST_LOG" "Max latency:")
-    STDDEV=$(extract_metric_from_log "$LATEST_LOG" "Std deviation:")
     
     # Append to CSV
     append_csv_row "$RESULTS_FILE" "$SERVICE_COUNT" "$PROXY_MODE" "$WORKER_POS" "$TOTAL_RULES" "$REL_POS" \
-                   "$MEAN_LATENCY" "$STDDEV" "$MIN_LATENCY" "$MAX_LATENCY" "TBD" "TBD" "TBD" "$LATEST_LOG"
+                   "$MEAN_LATENCY" "$MIN_LATENCY" "$MAX_LATENCY" "TBD" "TBD" "TBD" "$LATEST_LOG"
     
     echo -e "${GREEN}✓ Results recorded${NC}"
     echo ""
@@ -132,7 +131,6 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     echo "  Service count: $SERVICE_COUNT"
     echo "  Worker position: $WORKER_POS / $TOTAL_RULES ($REL_POS%)"
     echo "  Mean latency: $MEAN_LATENCY us"
-    echo "  Std deviation: $STDDEV us"
     echo "  Range: $MIN_LATENCY - $MAX_LATENCY us"
     echo ""
     

@@ -296,7 +296,7 @@ create_csv_header() {
     local csv_file="$1"
     
     mkdir -p "$(dirname "$csv_file")"
-    echo "ServiceCount,ProxyMode,WorkerPosition,TotalRules,RelativePosition%,MeanLatency_us,StdDev_us,MinLatency_us,MaxLatency_us,P50_us,P95_us,P99_us,LogFile" > "$csv_file"
+    echo "ServiceCount,ProxyMode,WorkerPosition,TotalRules,RelativePosition%,MeanLatency_us,MinLatency_us,MaxLatency_us,P50_us,P95_us,P99_us,LogFile" > "$csv_file"
 }
 
 append_csv_row() {
@@ -307,15 +307,14 @@ append_csv_row() {
     local total_rules="$5"
     local rel_pos="$6"
     local mean="$7"
-    local stddev="$8"
-    local min="$9"
-    local max="${10}"
-    local p50="${11:-TBD}"
-    local p95="${12:-TBD}"
-    local p99="${13:-TBD}"
-    local log_file="${14}"
+    local min="$8"
+    local max="$9"
+    local p50="${10:-TBD}"
+    local p95="${11:-TBD}"
+    local p99="${12:-TBD}"
+    local log_file="${13}"
     
-    echo "$service_count,$proxy_mode,$worker_pos,$total_rules,$rel_pos,$mean,$stddev,$min,$max,$p50,$p95,$p99,$log_file" >> "$csv_file"
+    echo "$service_count,$proxy_mode,$worker_pos,$total_rules,$rel_pos,$mean,$min,$max,$p50,$p95,$p99,$log_file" >> "$csv_file"
 }
 
 # ========================================

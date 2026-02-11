@@ -46,9 +46,6 @@ kretprobe:ipt_do_table
     @ipt_max_us = max($duration_us);
     @ipt_sum_us = sum($duration_us);
     
-    // Sum of squares for standard deviation
-    @ipt_sum_sq = sum($duration_us * $duration_us);
-    
     delete(@ipt_start[tid]);
 }
 
@@ -80,8 +77,6 @@ kretprobe:nft_do_chain
     @nft_max_us = max($duration_us);
     @nft_sum_us = sum($duration_us);
     
-    // Sum of squares for standard deviation
-    @nft_sum_sq = sum($duration_us * $duration_us);
     
     delete(@nft_start[tid]);
 }
@@ -97,18 +92,14 @@ interval:s:5
     
     if (@iptables_count > 0) {
         $ipt_avg = @ipt_sum_us / @iptables_count;
-        $ipt_variance = (@ipt_sum_sq / @iptables_count) - ($ipt_avg * $ipt_avg);
-        $ipt_stddev = $ipt_variance > 0 ? sqrt($ipt_variance) : 0;
-        printf("  [iptables] Count: %d, Min: %d us, Avg: %d us, Max: %d us, StdDev: %d us\n",
-               @iptables_count, @ipt_min_us, $ipt_avg, @ipt_max_us, $ipt_stddev);
+        printf("  [iptables] Count: %d, Min: %d us, Avg: %d us, Max: %d us\n",
+               @iptables_count, @ipt_min_us, $ipt_avg, @ipt_max_us);
     }
     
     if (@nftables_count > 0) {
         $nft_avg = @nft_sum_us / @nftables_count;
-        $nft_variance = (@nft_sum_sq / @nftables_count) - ($nft_avg * $nft_avg);
-        $nft_stddev = $nft_variance > 0 ? sqrt($nft_variance) : 0;
-        printf("  [nftables] Count: %d, Min: %d us, Avg: %d us, Max: %d us, StdDev: %d us\n",
-               @nftables_count, @nft_min_us, $nft_avg, @nft_max_us, $nft_stddev);
+        printf("  [nftables] Count: %d, Min: %d us, Avg: %d us, Max: %d us\n",
+               @nftables_count, @nft_min_us, $nft_avg, @nft_max_us);
     }
     
     if (@iptables_count == 0 && @nftables_count == 0) {
@@ -129,8 +120,6 @@ END
     // IPTABLES RESULTS
     if (@iptables_count > 0) {
         $ipt_avg = @ipt_sum_us / @iptables_count;
-        $ipt_variance = (@ipt_sum_sq / @iptables_count) - ($ipt_avg * $ipt_avg);
-        $ipt_stddev = $ipt_variance > 0 ? sqrt($ipt_variance) : 0;
         
         printf("--- IPTABLES MODE ---\n");
         printf("Total invocations: %d\n", @iptables_count);
@@ -138,7 +127,6 @@ END
         printf("  Min latency:    %d us\n", @ipt_min_us);
         printf("  Mean latency:   %d us\n", $ipt_avg);
         printf("  Max latency:    %d us\n", @ipt_max_us);
-        printf("  Std deviation:  %d us\n", $ipt_stddev);
         
         printf("\nLatency Distribution (microseconds):\n");
         print(@ipt_latency_us);
@@ -151,8 +139,6 @@ END
     // NFTABLES RESULTS
     if (@nftables_count > 0) {
         $nft_avg = @nft_sum_us / @nftables_count;
-        $nft_variance = (@nft_sum_sq / @nftables_count) - ($nft_avg * $nft_avg);
-        $nft_stddev = $nft_variance > 0 ? sqrt($nft_variance) : 0;
         
         printf("--- NFTABLES MODE ---\n");
         printf("Total invocations: %d\n", @nftables_count);
@@ -160,7 +146,6 @@ END
         printf("  Min latency:    %d us\n", @nft_min_us);
         printf("  Mean latency:   %d us\n", $nft_avg);
         printf("  Max latency:    %d us\n", @nft_max_us);
-        printf("  Std deviation:  %d us\n", $nft_stddev);
         
         printf("\nLatency Distribution (microseconds):\n");
         print(@nft_latency_us);
