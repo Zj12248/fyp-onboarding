@@ -12,8 +12,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
-DURATION=${1:-10}
-PACKET_RATE=${2:-10000}
+DURATION=${1:-20}
+PACKET_RATE=${2:-5000}
 WARMUP_PACKETS=${3:-100}
 SERVICE_COUNTS=(100 1000 5000 10000 20000)
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
