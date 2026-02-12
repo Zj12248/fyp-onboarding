@@ -51,7 +51,12 @@ type requestResult struct {
 }
 
 // ---------------- Main Test Runner ----------------
-func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
+// NOTE: Creates a NEW gRPC connection for EACH request to avoid conntrack caching.
+// This ensures every request traverses the full KUBE-SERVICES iptables/nftables chain
+// and accurately measures kube-proxy O(n) latency. Without this, only the first request
+// would measure kube-proxy overhead, while subsequent requests would use the cached
+// conntrack entry and bypass the chain entirely.
+func RunDataPlaneTest(config TestConfig) {
 	fmt.Printf("\n=== Data Plane Latency Test ===\n")
 	fmt.Printf("  Proxy Mode: %s\n", config.ProxyMode)
 	fmt.Printf("  Service Count: %d\n", config.ServiceCount)
@@ -67,7 +72,6 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 
 	os.MkdirAll("logs/dataplane", os.ModePerm)
 	logFile := fmt.Sprintf("logs/dataplane/%s.log", runID)
-	csvFile := fmt.Sprintf("logs/dataplane/%s.csv", runID)
 
 	// Setup logging
 	fmt.Printf("Creating log file: %s\n", logFile)
@@ -77,19 +81,9 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 	}
 	defer f.Close()
 	logger := log.New(f, "", log.LstdFlags)
-	fmt.Printf("Creating CSV file: %s\n", csvFile)
 
 	logger.Printf("Test Configuration: ProxyMode=%s, ServiceCount=%d, NumRequests=%d, RPS=%d",
 		config.ProxyMode, config.ServiceCount, config.NumRequests, config.RPS)
-
-	// Prepare CSV
-	csvF, err := os.Create(csvFile)
-	if err != nil {
-		log.Fatalf("Failed to create CSV file: %v", err)
-	}
-	defer csvF.Close()
-	// CSV columns: all time values in microseconds (µs)
-	fmt.Fprintf(csvF, "seq,rtt_us,data_plane_latency_us,worker_processing_us\n")
 
 	var results []requestResult
 	var resultsMutex sync.Mutex
@@ -110,6 +104,17 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 					fmt.Printf("Sending first request (seq=%d) to worker...\n", seq)
 				}
 
+				// Create NEW connection for each request to avoid conntrack cache
+				conn, err := grpc.Dial(config.WorkerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if err != nil {
+					logger.Printf("Request %d failed to connect: %v", seq, err)
+					if seq < 5 {
+						fmt.Printf("[ERROR] Request %d connection failed: %v\n", seq, err)
+					}
+					continue
+				}
+				client := pb.NewWorkerServiceClient(conn)
+
 				// Capture timestamp right before gRPC call (T2)
 				sendNs := time.Now().UnixNano()
 
@@ -118,6 +123,9 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 				cancel()
 
 				recvNs := time.Now().UnixNano()
+
+				// Close connection immediately to force new conntrack entry next time
+				conn.Close()
 
 				if err != nil {
 					logger.Printf("Request %d failed: %v", seq, err)
@@ -199,13 +207,6 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 		return
 	}
 
-	// Write results to CSV
-	fmt.Printf("Writing %d results to CSV...\n", len(results))
-	for _, r := range results {
-		fmt.Fprintf(csvF, "%d,%.2f,%.2f,%.2f\n",
-			r.sequenceNum, r.rttUs, r.dataPlaneLatencyUs, r.workerProcessingUs)
-	}
-
 	// Calculate statistics
 	stats := calculateStatistics(results)
 	successRate := float64(len(results)) / float64(config.NumRequests) * 100.0
@@ -232,9 +233,7 @@ func RunDataPlaneTest(client pb.WorkerServiceClient, config TestConfig) {
 	fmt.Printf("  Mean: %.2f µs\n", stats.RTTMean)
 	fmt.Printf("  P95:  %.2f µs\n", stats.RTTP95)
 	fmt.Printf("  P99:  %.2f µs\n", stats.RTTP99)
-	fmt.Printf("\nResults saved to:\n")
-	fmt.Printf("  %s\n", logFile)
-	fmt.Printf("  %s\n", csvFile)
+	fmt.Printf("\nResults saved to: %s\n", logFile)
 }
 
 // ---------------- Statistics ----------------
@@ -384,18 +383,17 @@ func RunFullExperiment(config TestConfig) {
 	defer f.Close()
 
 	// Write CSV header
-	fmt.Fprintf(f, "ServiceCount,ProxyMode,WorkerPosition,TotalRules,NumRequests,SuccessRate,MeanLatency_us,P50_us,P95_us,P99_us,RTTMean_us,RTTP95_us,RTTP99_us,LogFile\n")
+	fmt.Fprintf(f, "ServiceCount,ProxyMode,NumRequests,SuccessRate,MeanLatency_us,P50_us,P95_us,P99_us,RTTMean_us,RTTP95_us,RTTP99_us,LogFile\n")
 	fmt.Printf("Results will be saved to: %s\n\n", summaryFile)
 
-	// Connect to worker once
-	fmt.Printf("Connecting to worker at %s...\n", config.WorkerAddr)
-	conn, err := grpc.Dial(config.WorkerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Verify worker is accessible (test connection)
+	fmt.Printf("Testing connection to worker at %s...\n", config.WorkerAddr)
+	testConn, err := grpc.Dial(config.WorkerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
-	defer conn.Close()
-	client := pb.NewWorkerServiceClient(conn)
-	fmt.Println("✓ Connected successfully\n")
+	testConn.Close()
+	fmt.Println("✓ Worker accessible\n")
 
 	// Detect worker position in iptables chain
 	fmt.Println("Detecting worker position in KUBE-SERVICES chain...")
@@ -425,7 +423,7 @@ func RunFullExperiment(config TestConfig) {
 	currentServiceCount := 0
 
 	// Main experiment loop
-	for _, serviceCount := range serviceCounts {
+	for iterationIndex, serviceCount := range serviceCounts {
 		fmt.Printf("\n========================================\n")
 		fmt.Printf("Testing with %d services\n", serviceCount)
 		fmt.Printf("========================================\n\n")
@@ -445,8 +443,10 @@ func RunFullExperiment(config TestConfig) {
 			fmt.Printf("✓ Created %d services in %s\n\n", servicesToAdd, createDuration.Round(time.Second))
 			currentServiceCount = serviceCount
 
-			fmt.Printf("[2/3] Waiting for kube-proxy sync (120s)...\n")
-			waitForKubeproxySync(120)
+			// Dynamic wait time: 20s base + 40s per iteration
+			waitTime := 20 + (iterationIndex * 40)
+			fmt.Printf("[2/3] Waiting for kube-proxy sync (%ds)...\n", waitTime)
+			waitForKubeproxySync(waitTime)
 			fmt.Println()
 		} else {
 			fmt.Printf("Already at %d services, skipping creation\n\n", serviceCount)
@@ -465,12 +465,12 @@ func RunFullExperiment(config TestConfig) {
 		}
 
 		// Run test and capture results
-		results := runTestAndGetResults(client, testConfig, currentWorkerPosition, currentTotalRules)
+		results := runTestAndGetResults(testConfig, currentWorkerPosition, currentTotalRules)
 
 		if len(results) == 0 {
 			fmt.Printf("ERROR: No results for %d services\n", serviceCount)
-			fmt.Fprintf(f, "%d,%s,%d,%d,%d,0.00,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A\n",
-				serviceCount, config.ProxyMode, currentWorkerPosition, currentTotalRules, config.NumRequests)
+			fmt.Fprintf(f, "%d,%s,%d,0.00,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A\n",
+				serviceCount, config.ProxyMode, config.NumRequests)
 			continue
 		}
 
@@ -486,8 +486,8 @@ func RunFullExperiment(config TestConfig) {
 		}
 
 		// Write to summary CSV
-		fmt.Fprintf(f, "%d,%s,%d,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s\n",
-			serviceCount, config.ProxyMode, currentWorkerPosition, currentTotalRules, config.NumRequests, successRate,
+		fmt.Fprintf(f, "%d,%s,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s\n",
+			serviceCount, config.ProxyMode, config.NumRequests, successRate,
 			stats.Mean, stats.P50, stats.P95, stats.P99,
 			stats.RTTMean, stats.RTTP95, stats.RTTP99, logFile)
 
@@ -527,14 +527,13 @@ func RunFullExperiment(config TestConfig) {
 	fmt.Println(string(data))
 }
 
-func runTestAndGetResults(client pb.WorkerServiceClient, config TestConfig, workerPosition int, totalRules int) []requestResult {
+func runTestAndGetResults(config TestConfig, workerPosition int, totalRules int) []requestResult {
 	// Create individual test log/CSV
 	timestamp := time.Now().Format("20060102_150405")
 	runID := fmt.Sprintf("PM_%s_SC_%d_RPS_%d_%s",
 		config.ProxyMode, config.ServiceCount, config.RPS, timestamp)
 
 	logFile := fmt.Sprintf("logs/dataplane/%s.log", runID)
-	csvFile := fmt.Sprintf("logs/dataplane/%s.csv", runID)
 
 	f, err := os.Create(logFile)
 	if err != nil {
@@ -547,21 +546,6 @@ func runTestAndGetResults(client pb.WorkerServiceClient, config TestConfig, work
 	logger.Printf("Test Configuration: ProxyMode=%s, ServiceCount=%d, NumRequests=%d, RPS=%d",
 		config.ProxyMode, config.ServiceCount, config.NumRequests, config.RPS)
 	logger.Printf("Worker Position: %d / %d", workerPosition, totalRules)
-
-	csvF, err := os.Create(csvFile)
-	if err != nil {
-		log.Printf("Failed to create CSV file: %v", err)
-		return nil
-	}
-	defer csvF.Close()
-	// CSV header with metadata as comments
-	fmt.Fprintf(csvF, "# ProxyMode: %s\n", config.ProxyMode)
-	fmt.Fprintf(csvF, "# ServiceCount: %d\n", config.ServiceCount)
-	fmt.Fprintf(csvF, "# WorkerPosition: %d\n", workerPosition)
-	fmt.Fprintf(csvF, "# TotalRules: %d\n", totalRules)
-	fmt.Fprintf(csvF, "# RPS: %d\n", config.RPS)
-	fmt.Fprintf(csvF, "# NumRequests: %d\n", config.NumRequests)
-	fmt.Fprintf(csvF, "seq,rtt_us,data_plane_latency_us,worker_processing_us\n")
 
 	var results []requestResult
 	var resultsMutex sync.Mutex
@@ -576,12 +560,23 @@ func runTestAndGetResults(client pb.WorkerServiceClient, config TestConfig, work
 		go func() {
 			defer wg.Done()
 			for seq := range requestChan {
+				// Create NEW connection for each request to avoid conntrack cache
+				conn, err := grpc.Dial(config.WorkerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if err != nil {
+					logger.Printf("Request %d failed to connect: %v", seq, err)
+					continue
+				}
+				client := pb.NewWorkerServiceClient(conn)
+
 				// Capture timestamp right before gRPC call (T2)
 				sendNs := time.Now().UnixNano()
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				resp, err := client.DoWork(ctx, &pb.WorkRequest{DurationMs: 0, WorkMode: "echo"})
 				cancel()
 				recvNs := time.Now().UnixNano()
+
+				// Close connection immediately
+				conn.Close()
 
 				if err != nil {
 					logger.Printf("Request %d failed: %v", seq, err)
@@ -634,12 +629,6 @@ func runTestAndGetResults(client pb.WorkerServiceClient, config TestConfig, work
 		len(results), config.NumRequests,
 		float64(len(results))/float64(config.NumRequests)*100.0)
 
-	// Write to CSV
-	for _, r := range results {
-		fmt.Fprintf(csvF, "%d,%.2f,%.2f,%.2f\n",
-			r.sequenceNum, r.rttUs, r.dataPlaneLatencyUs, r.workerProcessingUs)
-	}
-
 	logger.Printf("Test completed. Duration=%s, SuccessfulRequests=%d/%d",
 		testDuration, len(results), config.NumRequests)
 
@@ -681,19 +670,17 @@ func main() {
 		// Full experiment mode - automated testing at multiple scales
 		RunFullExperiment(config)
 	} else {
-		// Single test mode - original behavior
-		fmt.Printf("\nConnecting to worker at %s...\n", config.WorkerAddr)
+		// Single test mode - test connection first
+		fmt.Printf("\nTesting connection to worker at %s...\n", config.WorkerAddr)
 		conn, err := grpc.Dial(config.WorkerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			log.Fatalf("Failed to connect: %v\nCheck DNS and network connectivity", err)
 		}
-		defer conn.Close()
-
-		client := pb.NewWorkerServiceClient(conn)
-		fmt.Println("✓ Connected successfully")
+		conn.Close()
+		fmt.Println("✓ Worker accessible")
 		fmt.Println("Ready to send requests...\n")
 
-		RunDataPlaneTest(client, config)
+		RunDataPlaneTest(config)
 		fmt.Println("\nTest complete!")
 	}
 }

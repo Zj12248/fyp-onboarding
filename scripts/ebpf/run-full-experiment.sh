@@ -72,6 +72,7 @@ echo ""
 
 # Track current service count
 CURRENT_SERVICE_COUNT=0
+ITERATION_INDEX=0
 
 # ========================================
 # Main Experiment Loop
@@ -90,6 +91,7 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
         START_INDEX=$((CURRENT_SERVICE_COUNT + 1))
         if ! create_dummy_services "$SERVICES_TO_ADD" "$START_INDEX" "$PROJECT_ROOT"; then
             echo -e "${RED}✗ Failed to create services${NC}"
+            ITERATION_INDEX=$((ITERATION_INDEX + 1))
             continue
         fi
         CREATE_DURATION=$(($(date +%s) - START_TIME))
@@ -97,9 +99,10 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
         CURRENT_SERVICE_COUNT=$SERVICE_COUNT
         echo ""
         
-        # Step 2: Wait for kube-proxy sync
-        echo -e "${BLUE}[2/4] Waiting for kube-proxy to sync rules (120s)...${NC}"
-        wait_for_kubeproxy_sync 120
+        # Step 2: Wait for kube-proxy sync - dynamic wait time
+        WAIT_TIME=$((20 + ITERATION_INDEX * 40))
+        echo -e "${BLUE}[2/4] Waiting for kube-proxy to sync rules (${WAIT_TIME}s)...${NC}"
+        wait_for_kubeproxy_sync $WAIT_TIME
     else
         echo -e "${YELLOW}Already at $SERVICE_COUNT services, skipping creation${NC}"
         echo ""
@@ -128,12 +131,13 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     
     # Extract latency metrics (match bpftrace output: "Average Latency:", "Maximum Latency:")
     MEAN_LATENCY=$(extract_metric_from_log "$LATEST_LOG" "Average Latency:")
-    MIN_LATENCY=""  # Not available in current bpftrace output
     MAX_LATENCY=$(extract_metric_from_log "$LATEST_LOG" "Maximum Latency:")
     
-    # Append to CSV (no relative position column anymore)
-    append_csv_row "$RESULTS_FILE" "$SERVICE_COUNT" "$PROXY_MODE" "$WORKER_POS" "$TOTAL_RULES" "N/A" \
-                   "$MEAN_LATENCY" "$MIN_LATENCY" "$MAX_LATENCY" "TBD" "TBD" "TBD" "$LATEST_LOG"
+    # Extract percentiles from histogram
+    IFS='|' read -r P50 P95 P99 <<< "$(extract_percentiles_from_histogram "$LATEST_LOG")"
+    
+    # Append to CSV with percentiles
+    append_csv_row "$RESULTS_FILE" "$SERVICE_COUNT" "$PROXY_MODE" "$MEAN_LATENCY" "$MAX_LATENCY" "$P50" "$P95" "$P99" "$LATEST_LOG"
     
     echo -e "${GREEN}✓ Results recorded${NC}"
     echo ""
@@ -143,6 +147,9 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     echo "  Worker position: $WORKER_POS / $TOTAL_RULES"
     echo "  Mean latency: ${MEAN_LATENCY:-N/A} us"
     echo "  Max latency: ${MAX_LATENCY:-N/A} us"
+    echo "  P50: ${P50:-N/A} us"
+    echo "  P95: ${P95:-N/A} us"
+    echo "  P99: ${P99:-N/A} us"
     echo ""
     
     # Pause between tests
@@ -151,6 +158,9 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
         sleep 30
         echo ""
     fi
+    
+    # Increment iteration index
+    ITERATION_INDEX=$((ITERATION_INDEX + 1))
 done
 
 # ========================================

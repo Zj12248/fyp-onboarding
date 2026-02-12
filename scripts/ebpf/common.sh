@@ -187,6 +187,67 @@ extract_worker_position_from_log() {
     echo "$worker_pos|$total_rules"
 }
 
+extract_percentiles_from_histogram() {
+    local log_file="$1"
+    
+    # Extract histogram data: look for lines like "[16, 32)     123 |@@@@|"
+    # Histogram format from bpftrace hist():
+    #   [lower, upper)   count |bars|
+    
+    # Parse histogram into arrays of bucket ranges and counts
+    local -a buckets_lower=()
+    local -a buckets_upper=()
+    local -a counts=()
+    local total_count=0
+    
+    # Read histogram lines (between "Latency Distribution" and next section)
+    while IFS= read -r line; do
+        # Match histogram bucket format: [lower, upper) count |bars|
+        if [[ $line =~ ^\[([0-9]+),\ ([0-9]+)\)\ +([0-9]+) ]]; then
+            local lower="${BASH_REMATCH[1]}"
+            local upper="${BASH_REMATCH[2]}"
+            local count="${BASH_REMATCH[3]}"
+            
+            buckets_lower+=("$lower")
+            buckets_upper+=("$upper")
+            counts+=("$count")
+            total_count=$((total_count + count))
+        fi
+    done < <(sed -n '/Latency Distribution/,/^$/p' "$log_file")
+    
+    if [ $total_count -eq 0 ]; then
+        echo "N/A|N/A|N/A"
+        return
+    fi
+    
+    # Calculate percentile thresholds
+    local p50_threshold=$((total_count * 50 / 100))
+    local p95_threshold=$((total_count * 95 / 100))
+    local p99_threshold=$((total_count * 99 / 100))
+    
+    # Find percentile values
+    local cumsum=0
+    local p50="N/A" p95="N/A" p99="N/A"
+    
+    for i in "${!counts[@]}"; do
+        cumsum=$((cumsum + counts[i]))
+        
+        if [ "$p50" = "N/A" ] && [ $cumsum -ge $p50_threshold ]; then
+            p50="${buckets_lower[i]}"
+        fi
+        
+        if [ "$p95" = "N/A" ] && [ $cumsum -ge $p95_threshold ]; then
+            p95="${buckets_lower[i]}"
+        fi
+        
+        if [ "$p99" = "N/A" ] && [ $cumsum -ge $p99_threshold ]; then
+            p99="${buckets_lower[i]}"
+        fi
+    done
+    
+    echo "$p50|$p95|$p99"
+}
+
 # ========================================
 # pktgen Configuration
 # ========================================
@@ -311,25 +372,21 @@ create_csv_header() {
     local csv_file="$1"
     
     mkdir -p "$(dirname "$csv_file")"
-    echo "ServiceCount,ProxyMode,WorkerPosition,TotalRules,RelativePosition%,MeanLatency_us,MinLatency_us,MaxLatency_us,P50_us,P95_us,P99_us,LogFile" > "$csv_file"
+    echo "ServiceCount,ProxyMode,MeanLatency_us,MaxLatency_us,P50_us,P95_us,P99_us,LogFile" > "$csv_file"
 }
 
 append_csv_row() {
     local csv_file="$1"
     local service_count="$2"
     local proxy_mode="$3"
-    local worker_pos="$4"
-    local total_rules="$5"
-    local rel_pos="$6"
-    local mean="$7"
-    local min="$8"
-    local max="$9"
-    local p50="${10:-TBD}"
-    local p95="${11:-TBD}"
-    local p99="${12:-TBD}"
-    local log_file="${13}"
+    local mean="$4"
+    local max="$5"
+    local p50="$6"
+    local p95="$7"
+    local p99="$8"
+    local log_file="$9"
     
-    echo "$service_count,$proxy_mode,$worker_pos,$total_rules,$rel_pos,$mean,$min,$max,$p50,$p95,$p99,$log_file" >> "$csv_file"
+    echo "$service_count,$proxy_mode,$mean,$max,$p50,$p95,$p99,$log_file" >> "$csv_file"
 }
 
 # ========================================

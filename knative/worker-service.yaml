@@ -23,11 +23,11 @@ spec:
           name: grpc
         resources:
           requests:
-            cpu: "100m"
-            memory: "128Mi"
+            cpu: "2000m"
+            memory: "512Mi"
           limits:
-            cpu: "500m"
-            memory: "256Mi"
+            cpu: "4000m"
+            memory: "1024Mi"
 
 ---
 # Service: Creates kube-proxy rules for packet routing
