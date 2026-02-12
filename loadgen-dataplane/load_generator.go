@@ -312,6 +312,7 @@ type TestConfig struct {
 	ProxyMode      string
 	ServiceCount   int
 	FullExperiment bool
+	RulePosition   string // "first" (best-case) or "last" (worst-case)
 }
 
 // ---------------- Service Management ----------------
@@ -392,10 +393,16 @@ func startKubeproxy() error {
 	return nil
 }
 
-func moveWorkerRuleToEnd(workerIP string, proxyMode string, projectRoot string) error {
-	fmt.Printf("Moving worker rule to end of chain (mode: %s)...\n", proxyMode)
+func moveWorkerRule(workerIP string, proxyMode string, position string, projectRoot string) error {
+	positionText := "end"
+	if position == "first" {
+		positionText = "start (best-case O(1))"
+	} else {
+		positionText = "end (worst-case O(n))"
+	}
+	fmt.Printf("Moving worker rule to %s of chain (mode: %s)...\n", positionText, proxyMode)
 	scriptPath := filepath.Join(projectRoot, "scripts/move-rule-to-end.sh")
-	cmd := exec.Command("sudo", "bash", scriptPath, workerIP, proxyMode)
+	cmd := exec.Command("sudo", "bash", scriptPath, workerIP, proxyMode, position)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -500,7 +507,7 @@ func RunFullExperiment(config TestConfig) {
 				continue
 			}
 			workerIP := strings.Split(config.WorkerAddr, ":")[0]
-			if err := moveWorkerRuleToEnd(workerIP, config.ProxyMode, projectRoot); err != nil {
+			if err := moveWorkerRule(workerIP, config.ProxyMode, config.RulePosition, projectRoot); err != nil {
 				fmt.Printf("WARNING: Failed to move worker rule: %v\n", err)
 				// Continue anyway - test can still proceed
 			}
@@ -717,10 +724,16 @@ func main() {
 	proxyMode := flag.String("proxy-mode", "unknown", "Kube-proxy mode: iptables-nft or nftables")
 	serviceCount := flag.Int("service-count", 1, "Number of services in cluster (single test mode)")
 	fullExperiment := flag.Bool("full-experiment", false, "Run full experiment at multiple service counts (100/1k/5k/10k/20k)")
+	rulePosition := flag.String("rule-position", "last", "Worker rule position: first (best-case O(1)) or last (worst-case O(n))")
 	flag.Parse()
 
 	if *proxyMode == "unknown" {
 		fmt.Println("WARNING: --proxy-mode not specified. Use --proxy-mode=iptables-nft or --proxy-mode=nftables")
+	}
+
+	if *rulePosition != "first" && *rulePosition != "last" {
+		fmt.Printf("WARNING: Invalid --rule-position '%s'. Using 'last' (worst-case). Valid values: first, last\n", *rulePosition)
+		*rulePosition = "last"
 	}
 
 	config := TestConfig{
@@ -730,6 +743,7 @@ func main() {
 		ProxyMode:      *proxyMode,
 		ServiceCount:   *serviceCount,
 		FullExperiment: *fullExperiment,
+		RulePosition:   *rulePosition,
 	}
 
 	if config.FullExperiment {

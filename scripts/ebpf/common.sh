@@ -388,6 +388,50 @@ move_worker_rule_to_end() {
     fi
 }
 
+move_worker_rule_to_position() {
+    local worker_ip="$1"
+    local script_dir="$2"
+    local position="${3:-last}"
+    
+    if [ -z "$worker_ip" ]; then
+        echo -e "${RED}Error: Worker IP not provided${NC}"
+        return 1
+    fi
+    
+    # Get proxy mode
+    local proxy_mode=$(get_kubeproxy_mode)
+    
+    if [ "$position" = "first" ]; then
+        echo -e "${CYAN}Moving worker rule to FIRST position (best-case O(1))...${NC}"
+    else
+        echo -e "${CYAN}Moving worker rule to LAST position (worst-case O(n))...${NC}"
+    fi
+    
+    bash "$script_dir/../move-rule-to-end.sh" "$worker_ip" "$proxy_mode" "$position"
+    
+    # Verify position
+    local total_rules=$(iptables -t nat -L KUBE-SERVICES -n --line-numbers | tail -n +3 | wc -l)
+    local worker_line=$(iptables -t nat -L KUBE-SERVICES -n --line-numbers | grep "$worker_ip" | grep "dpt:50051" | awk '{print $1}')
+    
+    if [ "$position" = "first" ]; then
+        if [ "$worker_line" -eq 1 ]; then
+            echo -e "${GREEN}✓ Worker rule at position $worker_line/$total_rules (best-case O(1))${NC}"
+            return 0
+        else
+            echo -e "${YELLOW}⚠ Worker rule at position $worker_line/$total_rules (not at first)${NC}"
+            return 1
+        fi
+    else
+        if [ "$worker_line" -eq "$total_rules" ]; then
+            echo -e "${GREEN}✓ Worker rule at position $worker_line/$total_rules (worst-case O(n))${NC}"
+            return 0
+        else
+            echo -e "${YELLOW}⚠ Worker rule at position $worker_line/$total_rules (not at end)${NC}"
+            return 1
+        fi
+    fi
+}
+
 # ========================================
 # Output Formatting
 # ========================================

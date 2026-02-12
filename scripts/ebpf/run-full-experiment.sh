@@ -1,9 +1,10 @@
 #!/bin/bash
 #
 # Full automated experiment: Test kube-proxy latency at multiple service counts
-# Usage: sudo bash run-full-experiment.sh [duration] [packet_rate] [warmup_packets]
+# Usage: sudo bash run-full-experiment.sh [duration] [packet_rate] [warmup_packets] [rule_position]
 #
-# Example: sudo bash run-full-experiment.sh 10 10000 100
+# Example: sudo bash run-full-experiment.sh 10 10000 100 last
+# Example: sudo bash run-full-experiment.sh 10 10000 100 first
 #
 
 set -e
@@ -15,6 +16,7 @@ source "$SCRIPT_DIR/common.sh"
 DURATION=${1:-20}
 PACKET_RATE=${2:-5000}
 WARMUP_PACKETS=${3:-100}
+RULE_POSITION=${4:-last}
 SERVICE_COUNTS=(100 1000 5000 10000 20000)
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
@@ -25,6 +27,7 @@ echo "  Service counts: ${SERVICE_COUNTS[@]}"
 echo "  Duration per test: ${DURATION}s"
 echo "  Packet rate: ${PACKET_RATE} pps"
 echo "  Warmup: ${WARMUP_PACKETS} packets"
+echo "  Rule position: ${RULE_POSITION}"
 echo ""
 echo "Estimated total time: ~$((${#SERVICE_COUNTS[@]} * (DURATION + 200))) seconds"
 echo ""
@@ -157,7 +160,11 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     
     echo "Quick Summary:"
     echo "  Service count: $SERVICE_COUNT"
-    echo "  Worker position: ${WORKER_LINE:-N/A} / ${TOTAL_RULES:-N/A} (worst-case)"
+    if [ "$RULE_POSITION" = "first" ]; then
+        echo "  Worker position: ${WORKER_LINE:-N/A} / ${TOTAL_RULES:-N/A} (best-case O(1))"
+    else
+        echo "  Worker position: ${WORKER_LINE:-N/A} / ${TOTAL_RULES:-N/A} (worst-case O(n))"
+    fi
     echo "  Mean latency: ${MEAN_LATENCY:-N/A} us"
     echo "  Max latency: ${MAX_LATENCY:-N/A} us"
     echo "  P50: ${P50:-N/A} us"

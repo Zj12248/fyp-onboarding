@@ -11,6 +11,7 @@ set -e
 DURATION=${1:-10}  # Test duration in seconds
 PACKET_RATE=${2:-10000}  # Packets per second
 WARMUP_PACKETS=${3:-100}  # Warmup packet count (default: 100)
+RULE_POSITION=${4:-last}  # Worker rule position: first (best-case) or last (worst-case)
 WORKER_IP=""
 PROXY_MODE=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,8 +25,7 @@ echo "  eBPF Kube-Proxy Latency Experiment"
 echo "=============================================="
 echo "Duration: ${DURATION}s"
 echo "Packet rate: ${PACKET_RATE} pps"
-echo "Warmup: ${WARMUP_PACKETS} packets"
-echo ""
+echo "Warmup: ${WARMUP_PACKETS} packets"echo "Rule position: ${RULE_POSITION}"echo ""
 
 # ========================================
 # Pre-flight Checks
@@ -136,6 +136,7 @@ Worker ClusterIP: $WORKER_IP
 Duration: ${DURATION}s
 Packet rate: ${PACKET_RATE} pps
 Warmup packets: ${WARMUP_PACKETS}
+Rule position: ${RULE_POSITION}
 Worker position: $WORKER_POSITION / $TOTAL_RULES
 ============================================
 

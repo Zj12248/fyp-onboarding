@@ -171,11 +171,22 @@ ls -lt logs/ebpf/
 
 **Custom parameters:**
 ```bash
-# Custom duration (60s per test) and packet rate
-sudo bash scripts/ebpf/run-full-experiment.sh 60 10000 100
-#                                            ^   ^     ^
-#                                         duration rate warmup
+# Custom duration (60s per test), packet rate, warmup, and rule position
+sudo bash scripts/ebpf/run-full-experiment.sh 60 10000 100 last
+#                                            ^   ^     ^   ^
+#                                         duration rate warmup position
+
+# Best-case positioning (rule at position 1)
+sudo bash scripts/ebpf/run-full-experiment.sh 20 5000 100 first
+
+# Worst-case positioning (rule at end) - default
+sudo bash scripts/ebpf/run-full-experiment.sh 20 5000 100 last
 ```
+
+**Rule Position Options:**
+- `first` - Worker rule at position 1 (best-case O(1)) - immediate match
+- `last` - Worker rule at end (worst-case O(n)) - traverses all rules (default)
+- Only affects iptables mode; nftables always uses O(1) hash lookup
 
 #### Analyzing Results
 
@@ -210,7 +221,7 @@ EOF
 #### Compare iptables vs nftables
 
 ```bash
-# Test iptables mode
+# Test iptables mode (worst-case)
 kubectl -n kube-system edit cm kube-proxy
 # Set: mode: "iptables"
 kubectl -n kube-system delete pods -l k8s-app=kube-proxy
@@ -218,10 +229,10 @@ kubectl -n kube-system wait --for=condition=Ready pod -l k8s-app=kube-proxy
 sleep 60
 
 # Run full experiment (~25 min)
-sudo bash scripts/ebpf/run-full-experiment.sh
+sudo bash scripts/ebpf/run-full-experiment.sh 20 5000 100 last
 
 # Save results
-mv logs/ebpf/experiment_summary_*.csv logs/ebpf/iptables_results.csv
+mv logs/ebpf/experiment_summary_*.csv logs/ebpf/iptables_worst_case.csv
 
 # Switch to nftables mode
 kubectl -n kube-system edit cm kube-proxy
@@ -231,17 +242,36 @@ kubectl -n kube-system wait --for=condition=Ready pod -l k8s-app=kube-proxy
 sleep 60
 
 # Run full experiment again
-sudo bash scripts/ebpf/run-full-experiment.sh
+sudo bash scripts/ebpf/run-full-experiment.sh 20 5000 100 last
 
 # Save results
 mv logs/ebpf/experiment_summary_*.csv logs/ebpf/nftables_results.csv
 
 # Compare side-by-side
-echo "=== iptables ==="
-column -t -s',' logs/ebpf/iptables_results.csv
+echo "=== iptables (worst-case) ==="
+column -t -s',' logs/ebpf/iptables_worst_case.csv
 echo ""
 echo "=== nftables ==="
 column -t -s',' logs/ebpf/nftables_results.csv
+```
+
+#### Compare iptables Best-Case vs Worst-Case
+
+```bash
+# Test best-case positioning (rule at position 1)
+sudo bash scripts/ebpf/run-full-experiment.sh 20 5000 100 first
+mv logs/ebpf/experiment_summary_*.csv logs/ebpf/iptables_best_case.csv
+
+# Test worst-case positioning (rule at end)
+sudo bash scripts/ebpf/run-full-experiment.sh 20 5000 100 last
+mv logs/ebpf/experiment_summary_*.csv logs/ebpf/iptables_worst_case.csv
+
+# Compare to show O(1) vs O(n) behavior
+echo "=== Best-Case (Position 1 - O(1)) ==="
+column -t -s',' logs/ebpf/iptables_best_case.csv
+echo ""
+echo "=== Worst-Case (Position N - O(n)) ==="
+column -t -s',' logs/ebpf/iptables_worst_case.csv
 ```
 
 **See [scripts/ebpf/README.md](scripts/ebpf/README.md) for complete eBPF documentation.**
@@ -391,7 +421,9 @@ This method provides **application-level RTT measurements** including:
 #### Quick Start (Full Experiment Mode)
 
 ```bash
-# Get worker ClusterIP
+# Get worker ClusterIP 
+# (configure proxymode --> iptables-nft / nftables)
+# (configure rule-position --> last / first)
 WORKER_IP=$(kubectl get svc worker -o jsonpath='{.spec.clusterIP}')
 
 # Run full automated experiment (100, 1k, 5k, 10k, 20k services)
@@ -399,7 +431,8 @@ go run loadgen-dataplane/load_generator.go \
   --worker=$WORKER_IP:50051 \
   --rps=200 \
   --num-requests=15000 \
-  --proxy-mode=iptables-nft \
+  --proxy-mode=<iptable / nftables> \
+  --rule-position=<first / last> \
   --full-experiment
 
 # View summary results
@@ -427,6 +460,7 @@ go run loadgen-dataplane/load_generator.go \
   --rps=1000 \
   --num-requests=50000 \
   --proxy-mode=iptables-nft \
+  --rule-position=last \
   --service-count=20000
 
 # View results
@@ -470,6 +504,40 @@ ServiceCount,ProxyMode,WorkerPosition,TotalRules,NumRequests,SuccessRate,MeanLat
 - **Data Plane Latency (data_plane_latency_us)**: One-way network latency = (RTT - WorkerProcessing) / 2
 - **Worker Processing (worker_processing_us)**: Time worker spent processing request
 - **Worker Position**: Position in iptables KUBE-SERVICES chain (affects iptables latency)
+
+#### Command-Line Flags
+
+- `--worker` - Worker gRPC endpoint (host:port)
+- `--rps` - Requests per second (default: 200)
+- `--num-requests` - Total requests to send (default: 10000)
+- `--proxy-mode` - Kube-proxy mode: `iptables-nft` or `nftables`
+- `--service-count` - Service count for single test mode (default: 1)
+- `--full-experiment` - Run full experiment at 100/1k/5k/10k/20k services
+- `--rule-position` - Worker rule position: `first` (best-case O(1)) or `last` (worst-case O(n)) (default: `last`)
+
+**Rule Position Significance:**
+- **`first`**: Places worker rule at position 1 in iptables KUBE-SERVICES chain → immediate match (best-case O(1))
+- **`last`**: Places worker rule at end of chain → traverses all rules (worst-case O(n))
+- Only affects iptables mode; nftables always uses O(1) hash lookup regardless of position
+
+**Example: Compare Best-Case vs Worst-Case iptables:**
+```bash
+WORKER_IP=$(kubectl get svc worker -o jsonpath='{.spec.clusterIP}')
+
+# Best-case: rule at position 1 (O(1) behavior)
+go run loadgen-dataplane/load_generator.go \
+  --worker=$WORKER_IP:50051 \
+  --proxy-mode=iptables-nft \
+  --rule-position=first \
+  --full-experiment
+
+# Worst-case: rule at end (O(n) behavior)
+go run loadgen-dataplane/load_generator.go \
+  --worker=$WORKER_IP:50051 \
+  --proxy-mode=iptables-nft \
+  --rule-position=last \
+  --full-experiment
+```
 
 #### Use Cases
 

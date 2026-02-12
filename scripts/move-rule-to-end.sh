@@ -1,20 +1,27 @@
 #!/bin/bash
 
-# Usage: sudo ./move-rule-to-end.sh <SERVICE-IP> [PROXY-MODE]
-# Example: sudo ./move-rule-to-end.sh 10.96.0.15 iptables-nft
+# Usage: sudo ./move-rule-to-end.sh <SERVICE-IP> [PROXY-MODE] [POSITION]
+# Example: sudo ./move-rule-to-end.sh 10.96.0.15 iptables-nft last
+# Example: sudo ./move-rule-to-end.sh 10.96.0.15 iptables-nft first
 # Example: sudo ./move-rule-to-end.sh 10.96.0.15 nftables
 
 SERVICE_IP=$1
 PROXY_MODE=${2:-iptables-nft}  # Default to iptables-nft if not specified
+POSITION=${3:-last}             # Default to last (worst-case) if not specified
 
 if [ -z "$SERVICE_IP" ]; then
-    echo "Usage: $0 <service-cluster-ip> [proxy-mode]"
+    echo "Usage: $0 <service-cluster-ip> [proxy-mode] [position]"
     echo "  proxy-mode: iptables, iptables-nft, or nftables (default: iptables-nft)"
+    echo "  position: first (best-case O(1)) or last (worst-case O(n)) (default: last)"
     echo "Error: No Service IP provided."
     exit 1
 fi
 
-echo "--- Moving Rule for $SERVICE_IP to End of Chain (Mode: $PROXY_MODE) ---"
+if [ "$POSITION" = "first" ]; then
+    echo "--- Moving Rule for $SERVICE_IP to START of Chain (Mode: $PROXY_MODE) ---"
+else
+    echo "--- Moving Rule for $SERVICE_IP to END of Chain (Mode: $PROXY_MODE) ---"
+fi
 
 # ============================================================
 # IPTABLES MODE
@@ -36,9 +43,14 @@ if [ "$PROXY_MODE" = "iptables" ] || [ "$PROXY_MODE" = "iptables-nft" ]; then
     echo "1. Deleting rule..."
     eval "iptables -t nat -D KUBE-SERVICES $CLEAN_RULE"
 
-    # 4. Append the rule to the end
-    echo "2. Appending rule to bottom..."
-    eval "iptables -t nat -A KUBE-SERVICES $CLEAN_RULE"
+    # 4. Insert at top or append to bottom based on POSITION
+    if [ "$POSITION" = "first" ]; then
+        echo "2. Inserting rule at top (best-case)..."
+        eval "iptables -t nat -I KUBE-SERVICES 1 $CLEAN_RULE"
+    else
+        echo "2. Appending rule to bottom (worst-case)..."
+        eval "iptables -t nat -A KUBE-SERVICES $CLEAN_RULE"
+    fi
 
     # 5. Verify
     echo "Done. Verifying position..."
@@ -48,10 +60,18 @@ if [ "$PROXY_MODE" = "iptables" ] || [ "$PROXY_MODE" = "iptables-nft" ]; then
     echo "Total Rules: $TOTAL_RULES"
     echo "Your Rule is at Line: $MY_RULE_LINE"
 
-    if [ "$MY_RULE_LINE" -eq "$TOTAL_RULES" ]; then
-        echo "SUCCESS: Rule is at the bottom (line $MY_RULE_LINE of $TOTAL_RULES)."
+    if [ "$POSITION" = "first" ]; then
+        if [ "$MY_RULE_LINE" -eq 1 ]; then
+            echo "SUCCESS: Rule is at the top (line 1 of $TOTAL_RULES) - best-case O(1)."
+        else
+            echo "WARNING: Rule is at line $MY_RULE_LINE but should be at line 1."
+        fi
     else
-        echo "WARNING: Rule is at line $MY_RULE_LINE but total rules is $TOTAL_RULES."
+        if [ "$MY_RULE_LINE" -eq "$TOTAL_RULES" ]; then
+            echo "SUCCESS: Rule is at the bottom (line $MY_RULE_LINE of $TOTAL_RULES) - worst-case O(n)."
+        else
+            echo "WARNING: Rule is at line $MY_RULE_LINE but total rules is $TOTAL_RULES."
+        fi
     fi
 
 # ============================================================
