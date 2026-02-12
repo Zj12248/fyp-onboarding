@@ -360,27 +360,33 @@ func getWorkerPosition(workerIP string, proxyMode string) (position int, totalRu
 
 func stopKubeproxy() error {
 	fmt.Println("Stopping kube-proxy...")
-	cmd := exec.Command("kubectl", "-n", "kube-system", "scale", "daemonset", "kube-proxy", "--replicas=0")
+	// Patch daemonset to add node selector that matches no nodes
+	cmd := exec.Command("kubectl", "-n", "kube-system", "patch", "daemonset", "kube-proxy",
+		"-p", `{"spec":{"template":{"spec":{"nodeSelector":{"non-existing-node":"true"}}}}}`)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to stop kube-proxy: %v", err)
 	}
-	time.Sleep(5 * time.Second)
+	fmt.Println("Waiting for kube-proxy pods to terminate...")
+	time.Sleep(15 * time.Second)
 	fmt.Println("✓ Kube-proxy stopped")
 	return nil
 }
 
 func startKubeproxy() error {
 	fmt.Println("Starting kube-proxy...")
-	cmd := exec.Command("kubectl", "-n", "kube-system", "scale", "daemonset", "kube-proxy", "--replicas=1")
+	// Remove the node selector to restore normal scheduling
+	cmd := exec.Command("kubectl", "-n", "kube-system", "patch", "daemonset", "kube-proxy",
+		"--type", "json",
+		"-p", `[{"op":"remove","path":"/spec/template/spec/nodeSelector/non-existing-node"}]`)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to start kube-proxy: %v", err)
 	}
-	time.Sleep(10 * time.Second)
-	fmt.Println("Waiting for kube-proxy to be ready...")
+	fmt.Println("Waiting for kube-proxy pods to start...")
+	time.Sleep(15 * time.Second)
 	exec.Command("kubectl", "-n", "kube-system", "wait", "--for=condition=Ready", "pod", "-l", "k8s-app=kube-proxy", "--timeout=60s").Run()
 	fmt.Println("✓ Kube-proxy started")
 	return nil

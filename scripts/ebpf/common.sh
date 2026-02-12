@@ -338,23 +338,27 @@ wait_for_kubeproxy_sync() {
 
 stop_kubeproxy() {
     echo -e "${YELLOW}Stopping kube-proxy...${NC}"
-    kubectl -n kube-system scale deployment kube-proxy --replicas=0 2>/dev/null || \
-    kubectl -n kube-system scale daemonset kube-proxy --replicas=0 2>/dev/null || {
+    # Patch daemonset to add node selector that matches no nodes
+    kubectl -n kube-system patch daemonset kube-proxy \
+        -p '{"spec":{"template":{"spec":{"nodeSelector":{"non-existing-node":"true"}}}}}' 2>/dev/null || {
         echo -e "${RED}Failed to stop kube-proxy${NC}"
         return 1
     }
-    sleep 5
+    echo "Waiting for kube-proxy pods to terminate..."
+    sleep 15
     echo -e "${GREEN}✓ Kube-proxy stopped${NC}"
 }
 
 start_kubeproxy() {
     echo -e "${YELLOW}Starting kube-proxy...${NC}"
-    kubectl -n kube-system scale deployment kube-proxy --replicas=1 2>/dev/null || \
-    kubectl -n kube-system scale daemonset kube-proxy --replicas=1 2>/dev/null || {
+    # Remove the node selector to restore normal scheduling
+    kubectl -n kube-system patch daemonset kube-proxy --type json \
+        -p '[{"op":"remove","path":"/spec/template/spec/nodeSelector/non-existing-node"}]' 2>/dev/null || {
         echo -e "${RED}Failed to start kube-proxy${NC}"
         return 1
     }
-    sleep 10
+    echo "Waiting for kube-proxy pods to start..."
+    sleep 15
     kubectl -n kube-system wait --for=condition=Ready pod -l k8s-app=kube-proxy --timeout=60s 2>/dev/null || true
     echo -e "${GREEN}✓ Kube-proxy started${NC}"
 }
