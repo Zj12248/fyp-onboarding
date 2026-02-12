@@ -190,33 +190,9 @@ sudo bash scripts/ebpf/run-full-experiment.sh 20 5000 100 last
 
 #### Analyzing Results
 
-```bash
 # View summary CSV (easily import into Excel/Python)
-column -t -s',' logs/ebpf/experiment_summary_*.csv
+- column -t -s',' logs/ebpf/experiment_summary_*.csv
 
-# Extract specific metrics
-CSV_FILE=$(ls -t logs/ebpf/experiment_summary_*.csv | head -1)
-echo "Service Count vs Max Latency:"
-awk -F',' 'NR>1 {print $1 " services → " $9 " µs"}' $CSV_FILE
-
-# Plot with Python (if pandas/matplotlib installed)
-python3 << 'EOF'
-import pandas as pd
-import matplotlib.pyplot as plt
-
-df = pd.read_csv('logs/ebpf/experiment_summary_*.csv')
-plt.figure(figsize=(10, 6))
-plt.plot(df['ServiceCount'], df['MaxLatency_us'], marker='o', label='Max (P100)')
-plt.plot(df['ServiceCount'], df['MeanLatency_us'], marker='s', label='Mean')
-plt.xlabel('Service Count')
-plt.ylabel('Latency (µs)')
-plt.title('Kube-Proxy Latency vs Scale')
-plt.legend()
-plt.grid(True)
-plt.savefig('latency_vs_services.png')
-print("Saved plot to latency_vs_services.png")
-EOF
-```
 
 #### Compare iptables vs nftables
 
@@ -278,7 +254,7 @@ column -t -s',' logs/ebpf/iptables_worst_case.csv
 
 ---
 
-### Method 2: RTT Measurement with hping3
+### Method 2: RTT Measurement with hping3 (implementation abandoned)
 
 **Measures round-trip time (RTT) through kube-proxy with conntrack bypass.**
 
@@ -314,91 +290,6 @@ ls -lt logs/rtt/
 - Extracts metrics (Min/Mean/Max/P50/P95/P99) to CSV
 - Cleans up between tests
 - ~60 minutes total runtime
-
-**Custom parameters:**
-```bash
-# Custom packet count (200) and warmup (20)
-sudo bash scripts/rtt/run-full-rtt-experiment.sh 200 20
-```
-
-#### Single Test Mode
-
-For testing at a specific service count:
-
-```bash
-# Single RTT measurement (default: 100 packets with 10 warmup)
-sudo bash scripts/rtt/measure-rtt-hping3.sh
-
-# Custom: 500 packets with 20 warmup
-sudo bash scripts/rtt/measure-rtt-hping3.sh 500 20
-
-# View results
-cat logs/rtt/rtt_iptables_*.log
-```
-
-#### Output Example
-
-```
-============================================
-  RTT Measurement with hping3
-============================================
-Kube-proxy mode: iptables
-Worker ClusterIP: 10.96.123.45
-Packet count: 100
-Warmup: 10 packets
-============================================
-
-Statistics (in microseconds):
-  Total measurements: 100
-  Min RTT:            125 µs (0.125 ms)
-  Mean RTT:           156 µs (0.156 ms)
-  Max RTT:            312 µs (0.312 ms)
-  
-Percentiles:
-  P50 (Median):       148 µs (0.148 ms)
-  P95:                198 µs (0.198 ms)
-  P99:                267 µs (0.267 ms)
-```
-
-#### Comparing RTT vs eBPF
-
-**Expected relationship:**
-```
-RTT ≈ 2 × eBPF_one-way + network_overhead
-```
-
-Example at 1000 services (iptables):
-- eBPF one-way: ~50µs
-- Expected RTT: ~100-120µs (2×50 + ~10-20µs overhead)
-- Actual RTT: ~130-150µs (includes network + processing)
-
-The RTT is typically slightly higher due to:
-- Network propagation delays (node-to-pod)
-- Worker processing time (minimal for echo service)
-- Additional kernel overhead for return path
-
-#### Use Cases
-
-1. **Validate eBPF measurements** - RTT should be ~2x one-way
-2. **End-to-end latency** - Including network and application layers
-3. **Conntrack bypass verification** - Confirm no caching benefits
-4. **Cross-mode comparison** - RTT differences between iptables/nftables
-
-#### Files Generated
-
-- `logs/rtt/rtt_<mode>_<timestamp>.log` - Summary statistics
-- `logs/rtt/rtt_<mode>_<timestamp>_raw.txt` - Raw RTT values (one per line in µs)
-
-**Tip:** Import raw data into Excel/Python for custom analysis:
-```bash
-# Calculate your own percentiles
-python3 << 'EOF'
-import numpy as np
-data = np.loadtxt('logs/rtt/rtt_iptables_*_raw.txt')
-print(f"P90: {np.percentile(data, 90):.0f} µs")
-print(f"P99.9: {np.percentile(data, 99.9):.0f} µs")
-EOF
-```
 
 ---
 
@@ -462,10 +353,6 @@ go run loadgen-dataplane/load_generator.go \
   --proxy-mode=iptables-nft \
   --rule-position=last \
   --service-count=20000
-
-# View results
-ls -lt logs/dataplane/
-cat logs/dataplane/PM_iptables-nft_SC_1000_*.log
 ```
 
 #### Output Files
@@ -550,39 +437,6 @@ go run loadgen-dataplane/load_generator.go \
 
 ---
 
-## Expected Results
-
-### eBPF Measurements (Pure Kernel Latency)
-
-**iptables mode (O(n) linear):**
-```
-100 services    → ~15-25µs avg
-500 services    → ~30-40µs avg
-1,000 services  → ~45-60µs avg
-5,000 services  → ~100-150µs avg
-10,000 services → ~200-300µs avg
-```
-📈 **Latency increases linearly** - each service adds ~0.02µs
-
-**nftables mode (O(1) constant):**
-```
-100 services    → ~10-15µs avg
-500 services    → ~10-15µs avg
-1,000 services  → ~10-15µs avg
-5,000 services  → ~10-15µs avg
-10,000 services → ~10-15µs avg
-```
-✅ **Latency stays constant** - hash table lookup is O(1)
-
-### Key Insights
-
-1. **eBPF proves O(n) vs O(1)** - Direct kernel measurement shows clear algorithmic difference
-2. **Conntrack bypass matters** - pktgen's randomized ports force full rule traversal
-3. **Scale impact** - iptables becomes ~20x slower than nftables at 10k services
-4. **Production implications** - Large clusters (1000+ services) benefit significantly from nftables
-
----
-
 ## Tools Documentation
 
 ### Fast Service Creation (Go Tools)
@@ -613,59 +467,6 @@ Shows:
 
 ---
 
-## Troubleshooting
-
-### "ERROR: go not found" or "go: command not found"
-This happens when Go is not in root's PATH when running with `sudo`. Fix:
-
-```bash
-# Option 1: Run with sudo -E to preserve your PATH
-sudo -E bash scripts/ebpf/run-full-experiment.sh
-
-# Option 2: Add Go to root's PATH permanently
-sudo ln -s /usr/local/go/bin/go /usr/bin/go
-
-# Option 3: Install Go system-wide
-wget https://go.dev/dl/go1.21.6.linux-amd64.tar.gz
-sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.21.6.linux-amd64.tar.gz
-sudo ln -s /usr/local/go/bin/go /usr/bin/go
-```
-
-### "ERROR: bpftrace not found"
-```bash
-sudo apt install bpftrace linux-headers-$(uname -r)
-```
-
-### "ERROR: Worker service not found"
-```bash
-kubectl apply -f knative/worker-service.yaml
-kubectl wait --for=condition=Ready pod -l app=worker
-```
-
-### "No packets traced yet"
-- Verify worker is running: `kubectl get pods -l app=worker`
-- Check ClusterIP exists: `kubectl get svc worker`
-- Ensure pktgen module loaded: `lsmod | grep pktgen`
-
-### Kube-proxy not syncing rules
-```bash
-# Check logs
-kubectl -n kube-system logs -l k8s-app=kube-proxy --tail=50
-
-# Verify mode
-kubectl -n kube-system get cm kube-proxy -o yaml | grep mode:
-
-# Restart if needed
-kubectl -n kube-system delete pods -l k8s-app=kube-proxy
-```
-
-### High node load during experiments
-- Reduce service count: Test at 100, 500, 1k first
-- Lower packet rate: `sudo bash scripts/ebpf/run-experiment.sh 30 5000`
-- Use nftables mode for large scales (handles 10k+ services better)
-
----
-
 ## References
 
 - [eBPF Performance Tools](http://www.brendangregg.com/bpf-performance-tools-book.html)
@@ -675,25 +476,6 @@ kubectl -n kube-system delete pods -l k8s-app=kube-proxy
    kubectl -n kube-system delete pods -l k8s-app=kube-proxy
    kubectl -n kube-system wait --for=condition=Ready pod -l k8s-app=kube-proxy
    ```
-
-5. **Run test with nftables**:
-   ```bash
-   # Worker ClusterIP remains the same
-   WORKER_IP=$(kubectl get svc worker -o jsonpath='{.spec.clusterIP}')
-   
-   go run loadgen-dataplane/load_generator.go \
-     --worker=$WORKER_IP:50051 \
-     --rps=50 --num-requests=2000 \
-     --proxy-mode=nftables --service-count=101
-   ```
-
-6. **Cleanup**:
-   ```bash
-   kubectl delete -f knative/worker-service.yaml
-   bash ./scripts/delete-dummy-services.sh
-   ```
-
-7. **Repeat for different service counts** (10, 50, 100, 500, 1000)
 
 ### Expected Results
 - **iptables-nft**: Latency increases linearly with service count (O(n) rule scan)
