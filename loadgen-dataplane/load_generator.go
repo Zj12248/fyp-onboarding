@@ -420,7 +420,7 @@ func RunFullExperiment(config TestConfig) {
 	defer f.Close()
 
 	// Write CSV header
-	fmt.Fprintf(f, "ServiceCount,ProxyMode,NumRequests,SuccessRate,MeanLatency_us,P50_us,P95_us,P99_us,RTTMean_us,RTTP95_us,RTTP99_us,LogFile\n")
+	fmt.Fprintf(f, "ServiceCount,ProxyMode,WorkerPosition,TotalRules,NumRequests,SuccessRate,MeanLatency_us,P50_us,P95_us,P99_us,RTTMean_us,RTTP95_us,RTTP99_us,LogFile\n")
 	fmt.Printf("Results will be saved to: %s\n\n", summaryFile)
 
 	// Verify worker is accessible (test connection)
@@ -537,8 +537,8 @@ func RunFullExperiment(config TestConfig) {
 		}
 
 		// Write to summary CSV
-		fmt.Fprintf(f, "%d,%s,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s\n",
-			serviceCount, config.ProxyMode, config.NumRequests, successRate,
+		fmt.Fprintf(f, "%d,%s,%d,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s\n",
+			serviceCount, config.ProxyMode, currentWorkerPosition, currentTotalRules, config.NumRequests, successRate,
 			stats.Mean, stats.P50, stats.P95, stats.P99,
 			stats.RTTMean, stats.RTTP95, stats.RTTP99, logFile)
 
