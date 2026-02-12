@@ -392,10 +392,10 @@ func startKubeproxy() error {
 	return nil
 }
 
-func moveWorkerRuleToEnd(workerIP string, projectRoot string) error {
-	fmt.Println("Moving worker rule to end of KUBE-SERVICES chain...")
+func moveWorkerRuleToEnd(workerIP string, proxyMode string, projectRoot string) error {
+	fmt.Printf("Moving worker rule to end of chain (mode: %s)...\n", proxyMode)
 	scriptPath := filepath.Join(projectRoot, "scripts/move-rule-to-end.sh")
-	cmd := exec.Command("sudo", "bash", scriptPath, workerIP)
+	cmd := exec.Command("sudo", "bash", scriptPath, workerIP, proxyMode)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -492,17 +492,17 @@ func RunFullExperiment(config TestConfig) {
 			waitForKubeproxySync(waitTime)
 			fmt.Println()
 
-			// Stop kube-proxy and move worker rule to worst-case position
-			fmt.Printf("[3/5] Forcing worker rule to worst-case position...\n")
+			// Worst-case positioning workflow (for experimental consistency)
+			// Note: Rule position only affects iptables (O(n)), not nftables (O(1) hash)
+			fmt.Printf("[3/5] Attempting worst-case rule positioning...\n")
 			if err := stopKubeproxy(); err != nil {
 				fmt.Printf("ERROR: Failed to stop kube-proxy: %v\n", err)
 				continue
 			}
 			workerIP := strings.Split(config.WorkerAddr, ":")[0]
-			if err := moveWorkerRuleToEnd(workerIP, projectRoot); err != nil {
-				fmt.Printf("ERROR: Failed to move worker rule: %v\n", err)
-				startKubeproxy() // Try to recover
-				continue
+			if err := moveWorkerRuleToEnd(workerIP, config.ProxyMode, projectRoot); err != nil {
+				fmt.Printf("WARNING: Failed to move worker rule: %v\n", err)
+				// Continue anyway - test can still proceed
 			}
 			fmt.Println()
 		} else {
@@ -510,15 +510,17 @@ func RunFullExperiment(config TestConfig) {
 		}
 
 		// Run test
-		fmt.Printf("[4/5] Running load test (kube-proxy stopped, worst-case position)...\n")
+		fmt.Printf("[4/5] Running load test...\n")
 		testConfig := config
 		testConfig.ServiceCount = serviceCount
 
-		// Get current worker position
+		// Get current worker position (iptables only - nftables uses hash tables)
 		workerIP := strings.Split(config.WorkerAddr, ":")[0]
 		currentWorkerPosition, currentTotalRules := getWorkerPosition(workerIP, config.ProxyMode)
 		if currentWorkerPosition > 0 {
-			fmt.Printf("Worker position in rules: %d / %d\n", currentWorkerPosition, currentTotalRules)
+			fmt.Printf("Worker position in iptables rules: %d / %d\n", currentWorkerPosition, currentTotalRules)
+		} else if config.ProxyMode == "nftables" {
+			fmt.Printf("Worker position: N/A (nftables uses O(1) hash lookup)\n")
 		}
 
 		// Run test and capture results
