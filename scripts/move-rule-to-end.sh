@@ -30,11 +30,11 @@ echo "Found Rule: $CLEAN_RULE"
 
 # 3. Delete the rule from its current position
 echo "1. Deleting rule..."
-iptables -t nat -D KUBE-SERVICES $CLEAN_RULE
+eval "iptables -t nat -D KUBE-SERVICES $CLEAN_RULE"
 
 # 4. Append the rule to the end
 echo "2. Appending rule to bottom..."
-iptables -t nat -A KUBE-SERVICES $CLEAN_RULE
+eval "iptables -t nat -A KUBE-SERVICES $CLEAN_RULE"
 
 # 5. Verify
 echo "Done. Verifying position..."
