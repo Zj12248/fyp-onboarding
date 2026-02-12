@@ -58,94 +58,32 @@ if [ "$PROXY_MODE" = "iptables" ] || [ "$PROXY_MODE" = "iptables-nft" ]; then
 # NFTABLES MODE
 # ============================================================
 elif [ "$PROXY_MODE" = "nftables" ]; then
+    echo "NOTE: nftables uses O(1) hash lookups - position is irrelevant."
+    
     # Check if nft command exists
     if ! command -v nft &> /dev/null; then
         echo "Error: nft command not found. Install with: sudo apt install nftables"
         exit 1
     fi
 
-    # 1. Find the kube-proxy table and chain
-    # Kube-proxy creates tables like "kube-proxy" with chains like "services"
     TABLE_NAME="kube-proxy"
-    CHAIN_NAME="services"
-
+    
     # Check if table exists
     if ! nft list table ip $TABLE_NAME &> /dev/null; then
         echo "Error: nftables table '$TABLE_NAME' not found."
-        echo "Available tables:"
-        nft list tables
         exit 1
     fi
 
-    # 2. Find the rule with the service IP
-    echo "Searching for rule with IP $SERVICE_IP..."
-    RULE_HANDLE=$(nft -a list chain ip $TABLE_NAME $CHAIN_NAME 2>/dev/null | grep "$SERVICE_IP" | grep -oP 'handle \K\d+' | head -1)
-
-    if [ -z "$RULE_HANDLE" ]; then
-        echo "Error: Rule for $SERVICE_IP not found in nftables chain 'ip $TABLE_NAME $CHAIN_NAME'."
-        echo "Trying alternative chain names..."
-        
-        # Try other possible chain names
-        for alt_chain in "service-endpoints" "kube-services" "KUBE-SERVICES"; do
-            RULE_HANDLE=$(nft -a list chain ip $TABLE_NAME $alt_chain 2>/dev/null | grep "$SERVICE_IP" | grep -oP 'handle \K\d+' | head -1)
-            if [ -n "$RULE_HANDLE" ]; then
-                CHAIN_NAME=$alt_chain
-                echo "Found in chain: $alt_chain"
-                break
-            fi
-        done
-        
-        if [ -z "$RULE_HANDLE" ]; then
-            echo "Error: Could not find rule in any known chain."
-            echo "Available chains in table $TABLE_NAME:"
-            nft list table ip $TABLE_NAME | grep "chain"
-            exit 1
-        fi
-    fi
-
-    echo "Found Rule Handle: $RULE_HANDLE"
-
-    # 3. Get the full rule definition
-    FULL_RULE=$(nft -a list chain ip $TABLE_NAME $CHAIN_NAME | grep "handle $RULE_HANDLE")
-    echo "Full Rule: $FULL_RULE"
-
-    # 4. Extract the rule without the handle
-    RULE_SPEC=$(echo "$FULL_RULE" | sed 's/ # handle [0-9]\+$//')
-    echo "Rule Spec: $RULE_SPEC"
-
-    # 5. Delete the rule by handle
-    echo "1. Deleting rule (handle $RULE_HANDLE)..."
-    nft delete rule ip $TABLE_NAME $CHAIN_NAME handle $RULE_HANDLE
-
-    if [ $? -ne 0 ]; then
-        echo "Error: Failed to delete rule."
-        exit 1
-    fi
-
-    # 6. Add the rule back at the end
-    echo "2. Adding rule to end of chain..."
-    nft add rule ip $TABLE_NAME $CHAIN_NAME $RULE_SPEC
-
-    if [ $? -ne 0 ]; then
-        echo "Error: Failed to add rule back."
-        exit 1
-    fi
-
-    # 7. Verify position
-    echo "Done. Verifying position..."
-    TOTAL_RULES=$(nft -a list chain ip $TABLE_NAME $CHAIN_NAME | grep "handle" | wc -l)
-    NEW_RULE_HANDLE=$(nft -a list chain ip $TABLE_NAME $CHAIN_NAME | grep "$SERVICE_IP" | grep -oP 'handle \K\d+' | head -1)
+    # Verify service exists
+    SERVICE_FOUND=$(nft list table ip $TABLE_NAME | grep -c "$SERVICE_IP")
     
-    # Get the position by counting rules
-    RULE_POSITION=$(nft -a list chain ip $TABLE_NAME $CHAIN_NAME | grep "handle" | grep -n "handle $NEW_RULE_HANDLE" | cut -d: -f1)
-
-    echo "Total Rules: $TOTAL_RULES"
-    echo "Your Rule Handle: $NEW_RULE_HANDLE (Position: $RULE_POSITION)"
-
-    if [ "$RULE_POSITION" -eq "$TOTAL_RULES" ]; then
-        echo "SUCCESS: Rule is at the bottom (position $RULE_POSITION of $TOTAL_RULES)."
+    if [ "$SERVICE_FOUND" -gt 0 ]; then
+        echo "✓ Service $SERVICE_IP found in nftables"
+        echo "SUCCESS: No positioning needed (hash table = O(1) lookup)."
+        exit 0
     else
-        echo "WARNING: Rule is at position $RULE_POSITION but total rules is $TOTAL_RULES."
+        echo "WARNING: Service $SERVICE_IP not found in nftables."
+        exit 0
     fi
 
 else
