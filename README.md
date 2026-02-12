@@ -397,8 +397,8 @@ WORKER_IP=$(kubectl get svc worker -o jsonpath='{.spec.clusterIP}')
 # Run full automated experiment (100, 1k, 5k, 10k, 20k services)
 go run loadgen-dataplane/load_generator.go \
   --worker=$WORKER_IP:50051 \
-  --rps=1000 \
-  --num-requests=100000 \
+  --rps=200 \
+  --num-requests=15000 \
   --proxy-mode=iptables-nft \
   --full-experiment
 

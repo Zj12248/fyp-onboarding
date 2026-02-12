@@ -358,6 +358,43 @@ func getWorkerPosition(workerIP string, proxyMode string) (position int, totalRu
 	return position, totalRules
 }
 
+func stopKubeproxy() error {
+	fmt.Println("Stopping kube-proxy...")
+	cmd := exec.Command("kubectl", "-n", "kube-system", "scale", "daemonset", "kube-proxy", "--replicas=0")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to stop kube-proxy: %v", err)
+	}
+	time.Sleep(5 * time.Second)
+	fmt.Println("✓ Kube-proxy stopped")
+	return nil
+}
+
+func startKubeproxy() error {
+	fmt.Println("Starting kube-proxy...")
+	cmd := exec.Command("kubectl", "-n", "kube-system", "scale", "daemonset", "kube-proxy", "--replicas=1")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to start kube-proxy: %v", err)
+	}
+	time.Sleep(10 * time.Second)
+	fmt.Println("Waiting for kube-proxy to be ready...")
+	exec.Command("kubectl", "-n", "kube-system", "wait", "--for=condition=Ready", "pod", "-l", "k8s-app=kube-proxy", "--timeout=60s").Run()
+	fmt.Println("✓ Kube-proxy started")
+	return nil
+}
+
+func moveWorkerRuleToEnd(workerIP string, projectRoot string) error {
+	fmt.Println("Moving worker rule to end of KUBE-SERVICES chain...")
+	scriptPath := filepath.Join(projectRoot, "scripts/move-rule-to-end.sh")
+	cmd := exec.Command("sudo", "bash", scriptPath, workerIP)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // ---------------- Full Experiment ----------------
 func RunFullExperiment(config TestConfig) {
 	serviceCounts := []int{100, 1000, 5000, 10000, 20000}
@@ -432,7 +469,7 @@ func RunFullExperiment(config TestConfig) {
 		servicesToAdd := serviceCount - currentServiceCount
 
 		if servicesToAdd > 0 {
-			fmt.Printf("[1/3] Creating %d additional services (total: %d)...\n", servicesToAdd, serviceCount)
+			fmt.Printf("[1/5] Creating %d additional services (total: %d)...\n", servicesToAdd, serviceCount)
 			startTime := time.Now()
 			startIndex := currentServiceCount + 1 // Start from next index
 			if err := createDummyServices(servicesToAdd, startIndex, projectRoot); err != nil {
@@ -445,15 +482,29 @@ func RunFullExperiment(config TestConfig) {
 
 			// Dynamic wait time: 20s base + 40s per iteration
 			waitTime := 20 + (iterationIndex * 40)
-			fmt.Printf("[2/3] Waiting for kube-proxy sync (%ds)...\n", waitTime)
+			fmt.Printf("[2/5] Waiting for kube-proxy sync (%ds)...\n", waitTime)
 			waitForKubeproxySync(waitTime)
+			fmt.Println()
+
+			// Stop kube-proxy and move worker rule to worst-case position
+			fmt.Printf("[3/5] Forcing worker rule to worst-case position...\n")
+			if err := stopKubeproxy(); err != nil {
+				fmt.Printf("ERROR: Failed to stop kube-proxy: %v\n", err)
+				continue
+			}
+			workerIP := strings.Split(config.WorkerAddr, ":")[0]
+			if err := moveWorkerRuleToEnd(workerIP, projectRoot); err != nil {
+				fmt.Printf("ERROR: Failed to move worker rule: %v\n", err)
+				startKubeproxy() // Try to recover
+				continue
+			}
 			fmt.Println()
 		} else {
 			fmt.Printf("Already at %d services, skipping creation\n\n", serviceCount)
 		}
 
 		// Run test
-		fmt.Printf("[3/3] Running load test...\n")
+		fmt.Printf("[4/5] Running load test (kube-proxy stopped, worst-case position)...\n")
 		testConfig := config
 		testConfig.ServiceCount = serviceCount
 
@@ -499,6 +550,13 @@ func RunFullExperiment(config TestConfig) {
 		fmt.Printf("  Mean latency: %.2f µs\n", stats.Mean)
 		fmt.Printf("  P95 latency: %.2f µs\n", stats.P95)
 		fmt.Printf("  P99 latency: %.2f µs\n", stats.P99)
+
+		// Restart kube-proxy for next iteration
+		fmt.Printf("\n[5/5] Restarting kube-proxy...\n")
+		if err := startKubeproxy(); err != nil {
+			fmt.Printf("WARNING: Failed to restart kube-proxy: %v\n", err)
+		}
+		fmt.Println()
 
 		// Pause between tests
 		if serviceCount != serviceCounts[len(serviceCounts)-1] {

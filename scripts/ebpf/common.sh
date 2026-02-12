@@ -63,7 +63,7 @@ ensure_worker_deployed() {
     if [ -z "$WORKER_IP" ]; then
         echo -e "${YELLOW}Worker service not found. Deploying...${NC}"
         kubectl apply -f "$project_root/knative/worker-service.yaml"
-        kubectl wait --for=condition=Ready pod -l app=worker --timeout=120s
+        kubectl wait --for=condition=Ready pod -l app=worker --timeout=80s
         WORKER_IP=$(get_worker_ip)
         
         if [ -z "$WORKER_IP" ]; then
@@ -333,6 +333,58 @@ wait_for_kubeproxy_sync() {
 }
 
 # ========================================
+# Kube-Proxy Control
+# ========================================
+
+stop_kubeproxy() {
+    echo -e "${YELLOW}Stopping kube-proxy...${NC}"
+    kubectl -n kube-system scale deployment kube-proxy --replicas=0 2>/dev/null || \
+    kubectl -n kube-system scale daemonset kube-proxy --replicas=0 2>/dev/null || {
+        echo -e "${RED}Failed to stop kube-proxy${NC}"
+        return 1
+    }
+    sleep 5
+    echo -e "${GREEN}✓ Kube-proxy stopped${NC}"
+}
+
+start_kubeproxy() {
+    echo -e "${YELLOW}Starting kube-proxy...${NC}"
+    kubectl -n kube-system scale deployment kube-proxy --replicas=1 2>/dev/null || \
+    kubectl -n kube-system scale daemonset kube-proxy --replicas=1 2>/dev/null || {
+        echo -e "${RED}Failed to start kube-proxy${NC}"
+        return 1
+    }
+    sleep 10
+    kubectl -n kube-system wait --for=condition=Ready pod -l k8s-app=kube-proxy --timeout=60s 2>/dev/null || true
+    echo -e "${GREEN}✓ Kube-proxy started${NC}"
+}
+
+move_worker_rule_to_end() {
+    local worker_ip="$1"
+    local script_dir="$2"
+    
+    if [ -z "$worker_ip" ]; then
+        echo -e "${RED}Error: Worker IP not provided${NC}"
+        return 1
+    fi
+    
+    echo -e "${CYAN}Moving worker rule to end of KUBE-SERVICES chain...${NC}"
+    bash "$script_dir/../move-rule-to-end.sh" "$worker_ip"
+    
+    # Verify position
+    local total_rules=$(iptables -t nat -L KUBE-SERVICES -n --line-numbers | tail -n +3 | wc -l)
+    local worker_line=$(iptables -t nat -L KUBE-SERVICES -n --line-numbers | grep "$worker_ip" | grep "dpt:50051" | awk '{print $1}')
+    
+    if [ "$worker_line" -eq "$total_rules" ]; then
+        echo -e "${GREEN}✓ Worker rule at position $worker_line/$total_rules (worst-case)${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}⚠ Worker rule at position $worker_line/$total_rules (not at end)${NC}"
+        return 1
+    fi
+}
+
+# ========================================
 # Output Formatting
 # ========================================
 
@@ -372,21 +424,23 @@ create_csv_header() {
     local csv_file="$1"
     
     mkdir -p "$(dirname "$csv_file")"
-    echo "ServiceCount,ProxyMode,MeanLatency_us,MaxLatency_us,P50_us,P95_us,P99_us,LogFile" > "$csv_file"
+    echo "ServiceCount,ProxyMode,WorkerPosition,TotalRules,MeanLatency_us,MaxLatency_us,P50_us,P95_us,P99_us,LogFile" > "$csv_file"
 }
 
 append_csv_row() {
     local csv_file="$1"
     local service_count="$2"
     local proxy_mode="$3"
-    local mean="$4"
-    local max="$5"
-    local p50="$6"
-    local p95="$7"
-    local p99="$8"
-    local log_file="$9"
+    local worker_pos="$4"
+    local total_rules="$5"
+    local mean="$6"
+    local max="$7"
+    local p50="$8"
+    local p95="$9"
+    local p99="${10}"
+    local log_file="${11}"
     
-    echo "$service_count,$proxy_mode,$mean,$max,$p50,$p95,$p99,$log_file" >> "$csv_file"
+    echo "$service_count,$proxy_mode,$worker_pos,$total_rules,$mean,$max,$p50,$p95,$p99,$log_file" >> "$csv_file"
 }
 
 # ========================================

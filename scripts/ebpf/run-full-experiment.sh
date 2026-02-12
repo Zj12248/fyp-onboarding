@@ -86,7 +86,7 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     
     if [ $SERVICES_TO_ADD -gt 0 ]; then
         # Step 1: Create additional dummy services
-        echo -e "${BLUE}[1/4] Creating $SERVICES_TO_ADD additional dummy services (total: $SERVICE_COUNT)...${NC}"
+        echo -e "${BLUE}[1/5] Creating $SERVICES_TO_ADD additional dummy services (total: $SERVICE_COUNT)...${NC}"
         START_TIME=$(date +%s)
         START_INDEX=$((CURRENT_SERVICE_COUNT + 1))
         if ! create_dummy_services "$SERVICES_TO_ADD" "$START_INDEX" "$PROJECT_ROOT"; then
@@ -101,8 +101,19 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
         
         # Step 2: Wait for kube-proxy sync - dynamic wait time
         WAIT_TIME=$((20 + ITERATION_INDEX * 40))
-        echo -e "${BLUE}[2/4] Waiting for kube-proxy to sync rules (${WAIT_TIME}s)...${NC}"
+        echo -e "${BLUE}[2/5] Waiting for kube-proxy to sync rules (${WAIT_TIME}s)...${NC}"
         wait_for_kubeproxy_sync $WAIT_TIME
+        echo ""
+        
+        # Step 3: Stop kube-proxy and move worker rule to end
+        echo -e "${BLUE}[3/5] Forcing worker rule to worst-case position...${NC}"
+        stop_kubeproxy
+        move_worker_rule_to_end "$WORKER_IP" "$SCRIPT_DIR"
+        
+        # Capture actual worker position after move
+        TOTAL_RULES=$(iptables -t nat -L KUBE-SERVICES -n --line-numbers | tail -n +3 | wc -l)
+        WORKER_LINE=$(iptables -t nat -L KUBE-SERVICES -n --line-numbers | grep "$WORKER_IP" | grep "dpt:50051" | awk '{print $1}')
+        echo ""
     else
         echo -e "${YELLOW}Already at $SERVICE_COUNT services, skipping creation${NC}"
         echo ""
@@ -113,8 +124,8 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     echo -e "${GREEN}✓ Verified: $ACTUAL_COUNT dummy services + worker${NC}"
     echo ""
     
-    # Step 3: Run eBPF experiment
-    echo -e "${BLUE}[3/4] Running eBPF measurement...${NC}"
+    # Step 4: Run eBPF experiment (with kube-proxy stopped)
+    echo -e "${BLUE}[4/5] Running eBPF measurement (kube-proxy stopped, worst-case position)...${NC}"
     bash "$SCRIPT_DIR/run-experiment.sh" $DURATION $PACKET_RATE $WARMUP_PACKETS
     
     # Find the most recent log file
@@ -126,9 +137,6 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     # Extract metrics from log file
     echo -e "${CYAN}Extracting metrics...${NC}"
     
-    # Get worker position from log
-    IFS='|' read -r WORKER_POS TOTAL_RULES <<< "$(extract_worker_position_from_log "$LATEST_LOG")"
-    
     # Extract latency metrics (match bpftrace output: "Average Latency:", "Maximum Latency:")
     MEAN_LATENCY=$(extract_metric_from_log "$LATEST_LOG" "Average Latency:")
     MAX_LATENCY=$(extract_metric_from_log "$LATEST_LOG" "Maximum Latency:")
@@ -136,15 +144,20 @@ for SERVICE_COUNT in "${SERVICE_COUNTS[@]}"; do
     # Extract percentiles from histogram
     IFS='|' read -r P50 P95 P99 <<< "$(extract_percentiles_from_histogram "$LATEST_LOG")"
     
-    # Append to CSV with percentiles
-    append_csv_row "$RESULTS_FILE" "$SERVICE_COUNT" "$PROXY_MODE" "$MEAN_LATENCY" "$MAX_LATENCY" "$P50" "$P95" "$P99" "$LATEST_LOG"
+    # Append to CSV with percentiles and worker position
+    append_csv_row "$RESULTS_FILE" "$SERVICE_COUNT" "$PROXY_MODE" "${WORKER_LINE:-N/A}" "${TOTAL_RULES:-N/A}" "$MEAN_LATENCY" "$MAX_LATENCY" "$P50" "$P95" "$P99" "$LATEST_LOG"
     
     echo -e "${GREEN}✓ Results recorded${NC}"
     echo ""
     
+    # Step 5: Restart kube-proxy for next iteration
+    echo -e "${BLUE}[5/5] Restarting kube-proxy...${NC}"
+    start_kubeproxy
+    echo ""
+    
     echo "Quick Summary:"
     echo "  Service count: $SERVICE_COUNT"
-    echo "  Worker position: $WORKER_POS / $TOTAL_RULES"
+    echo "  Worker position: ${WORKER_LINE:-N/A} / ${TOTAL_RULES:-N/A} (worst-case)"
     echo "  Mean latency: ${MEAN_LATENCY:-N/A} us"
     echo "  Max latency: ${MAX_LATENCY:-N/A} us"
     echo "  P50: ${P50:-N/A} us"
