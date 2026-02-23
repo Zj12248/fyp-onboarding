@@ -322,7 +322,7 @@ go run loadgen-dataplane/load_generator.go \
   --worker=$WORKER_IP:50051 \
   --rps=200 \
   --num-requests=15000 \
-  --proxy-mode=<iptable / nftables> \
+  --proxy-mode=<iptables-nft / nftables> \
   --rule-position=<first / last> \
   --full-experiment
 
