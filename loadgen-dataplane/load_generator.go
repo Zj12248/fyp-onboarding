@@ -499,19 +499,23 @@ func RunFullExperiment(config TestConfig) {
 			waitForKubeproxySync(waitTime)
 			fmt.Println()
 
-			// Worst-case positioning workflow (for experimental consistency)
+			// Rule positioning only needed for iptables mode
 			// Note: Rule position only affects iptables (O(n)), not nftables (O(1) hash)
-			fmt.Printf("[3/5] Attempting worst-case rule positioning...\n")
-			if err := stopKubeproxy(); err != nil {
-				fmt.Printf("ERROR: Failed to stop kube-proxy: %v\n", err)
-				continue
+			if config.ProxyMode != "nftables" {
+				fmt.Printf("[3/5] Positioning worker rule for iptables mode...\n")
+				if err := stopKubeproxy(); err != nil {
+					fmt.Printf("ERROR: Failed to stop kube-proxy: %v\n", err)
+					continue
+				}
+				workerIP := strings.Split(config.WorkerAddr, ":")[0]
+				if err := moveWorkerRule(workerIP, config.ProxyMode, config.RulePosition, projectRoot); err != nil {
+					fmt.Printf("WARNING: Failed to move worker rule: %v\n", err)
+					// Continue anyway - test can still proceed
+				}
+				fmt.Println()
+			} else {
+				fmt.Printf("[3/5] Skipping rule positioning (nftables uses O(1) hash lookup)\n\n")
 			}
-			workerIP := strings.Split(config.WorkerAddr, ":")[0]
-			if err := moveWorkerRule(workerIP, config.ProxyMode, config.RulePosition, projectRoot); err != nil {
-				fmt.Printf("WARNING: Failed to move worker rule: %v\n", err)
-				// Continue anyway - test can still proceed
-			}
-			fmt.Println()
 		} else {
 			fmt.Printf("Already at %d services, skipping creation\n\n", serviceCount)
 		}
@@ -566,12 +570,14 @@ func RunFullExperiment(config TestConfig) {
 		fmt.Printf("  P95 latency: %.2f µs\n", stats.P95)
 		fmt.Printf("  P99 latency: %.2f µs\n", stats.P99)
 
-		// Restart kube-proxy for next iteration
-		fmt.Printf("\n[5/5] Restarting kube-proxy...\n")
-		if err := startKubeproxy(); err != nil {
-			fmt.Printf("WARNING: Failed to restart kube-proxy: %v\n", err)
+		// Restart kube-proxy for next iteration (only if it was stopped for iptables)
+		if config.ProxyMode != "nftables" && servicesToAdd > 0 {
+			fmt.Printf("\n[5/5] Restarting kube-proxy...\n")
+			if err := startKubeproxy(); err != nil {
+				fmt.Printf("WARNING: Failed to restart kube-proxy: %v\n", err)
+			}
+			fmt.Println()
 		}
-		fmt.Println()
 
 		// Pause between tests
 		if serviceCount != serviceCounts[len(serviceCounts)-1] {
