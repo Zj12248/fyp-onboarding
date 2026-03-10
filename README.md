@@ -18,7 +18,7 @@ This project measures the **pure kernel-level packet forwarding latency** in Kub
 ├── worker.proto                    # Protocol buffer definition
 ├── README.md                       # This file
 │
-├── knative/
+├── kubernetes
 │   └── worker-service.yaml         # Worker Deployment + Service
 │
 ├── loadgen-dataplane/              # (Legacy) gRPC load generator
@@ -121,11 +121,11 @@ bpftrace --version
    sudo docker push zj3214/worker:latest
    ```
 
-8. **Update the image** in [knative/worker-service.yaml](knative/worker-service.yaml) to match your Docker Hub username.
+8. **Update the image** in [kubernetes/worker-service.yaml](knative/worker-service.yaml) to match your Docker Hub username.
 
 9. **Deploy the worker**:
    ```bash
-   kubectl apply -f knative/worker-service.yaml
+   kubectl apply -f kubernetes/worker-service.yaml
    kubectl wait --for=condition=Ready pod -l app=worker
    ```
 
@@ -254,45 +254,6 @@ column -t -s',' logs/ebpf/iptables_worst_case.csv
 
 ---
 
-### Method 2: RTT Measurement with hping3 (implementation abandoned)
-
-**Measures round-trip time (RTT) through kube-proxy with conntrack bypass.**
-
-This complements eBPF one-way measurements by providing end-to-end RTT including:
-- Outbound kube-proxy rule traversal
-- Network propagation to worker
-- Return path through kube-proxy
-- Network propagation back to sender
-
-#### Key Feature: Conntrack Bypass
-
-Each packet uses a **unique sequential source port** to create a unique 5-tuple, forcing:
-- Full kube-proxy rule traversal every time (no NAT cache hits)
-- Fresh connection state for each measurement
-- Realistic worst-case scenario for service discovery
-
-#### Quick Start
-
-```bash
-# Run full automated experiment suite (tests at 100, 1k, 5k, 10k, 20k, 30k services)
-sudo bash scripts/rtt/run-full-rtt-experiment.sh
-
-# View CSV results summary
-cat logs/rtt/rtt_experiment_summary_*.csv
-
-# View individual detailed logs
-ls -lt logs/rtt/
-```
-
-**What it does:**
-- Creates dummy services at multiple scales automatically
-- Runs RTT measurements at each scale
-- Extracts metrics (Min/Mean/Max/P50/P95/P99) to CSV
-- Cleans up between tests
-- ~60 minutes total runtime
-
----
-
 ### Method 3: gRPC Load Generator
 
 **Measures end-to-end application latency using actual gRPC requests.**
@@ -334,9 +295,35 @@ cat logs/dataplane/experiment_summary_*.csv
 - Creates dummy services at multiple scales automatically
 - Runs gRPC load tests at each scale
 - Tracks worker position in iptables rules
-- Extracts metrics (Mean, P50, P95, P99) to CSV
+- Extracts metrics (Mean, P50, P95, P99) to CSV and collects background node CPU utilization
 - Cleans up between tests
 - ~30-35 minutes total runtime (50 seconds per test)
+
+#### Throughput Experiment Mode (Varying RPS)
+
+Measures system throughput and CPU utilization under increasing RPS loads (from 500 to 10,000 RPS) at a fixed service count.
+
+```bash
+WORKER_IP=$(kubectl get svc worker -o jsonpath='{.spec.clusterIP}')
+
+# Run throughput experiment (scaling RPS automatically)
+go run loadgen-dataplane/load_generator.go \
+  --worker=$WORKER_IP:50051 \
+  --proxy-mode=<iptables-nft / nftables> \
+  --service-count=10000 \
+  --throughput-experiment
+
+# View throughput results and CPU metric files
+cat logs/throughput/throughput_summary_*.csv
+ls -lt logs/throughput/
+```
+
+**What it does:**
+- Verifies target dummy service count
+- Steps through increasing RPS loads (500, 1000, 2000, 3000, 5000, 8000, 10000)
+- Records latency metrics at each concurrent load step
+- Automatically collects continuous node CPU measurements (`kubectl top nodes`) during the test
+- Outputs specialized throughput CSVs and per-RPS CPU summaries in `logs/throughput/`
 
 #### Single Test Mode
 

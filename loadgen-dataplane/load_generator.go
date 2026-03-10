@@ -566,7 +566,7 @@ func RunFullExperiment(config TestConfig) {
 		go collectCPUMetrics(ctx, metricsChan, 2*time.Second)
 
 		// Run test and capture results
-		results := runTestAndGetResults(testConfig, currentWorkerPosition, currentTotalRules)
+		results := runTestAndGetResults(testConfig, currentWorkerPosition, currentTotalRules, "logs/dataplane")
 
 		// Stop CPU metrics collection
 		cancel()
@@ -641,13 +641,13 @@ func RunFullExperiment(config TestConfig) {
 	fmt.Println(string(data))
 }
 
-func runTestAndGetResults(config TestConfig, workerPosition int, totalRules int) []requestResult {
+func runTestAndGetResults(config TestConfig, workerPosition int, totalRules int, logDir string) []requestResult {
 	// Create individual test log/CSV
 	timestamp := time.Now().Format("20060102_150405")
 	runID := fmt.Sprintf("PM_%s_SC_%d_RPS_%d_%s",
 		config.ProxyMode, config.ServiceCount, config.RPS, timestamp)
 
-	logFile := fmt.Sprintf("logs/dataplane/%s.log", runID)
+	logFile := fmt.Sprintf("%s/%s.log", logDir, runID)
 
 	f, err := os.Create(logFile)
 	if err != nil {
@@ -882,7 +882,7 @@ func RunThroughputExperiment(config TestConfig) {
 		go collectCPUMetrics(ctx, metricsChan, 2*time.Second)
 
 		// Run test and capture results
-		results := runTestAndGetResults(testConfig, workerPosition, totalRules)
+		results := runTestAndGetResults(testConfig, workerPosition, totalRules, "logs/throughput")
 
 		// Stop CPU metrics collection
 		cancel()
