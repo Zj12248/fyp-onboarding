@@ -306,13 +306,14 @@ func percentile(sorted []float64, p float64) float64 {
 
 // ---------------- Configuration ----------------
 type TestConfig struct {
-	WorkerAddr     string
-	RPS            int
-	NumRequests    int
-	ProxyMode      string
-	ServiceCount   int
-	FullExperiment bool
-	RulePosition   string // "first" (best-case) or "last" (worst-case)
+	WorkerAddr           string
+	RPS                  int
+	NumRequests          int
+	ProxyMode            string
+	ServiceCount         int
+	FullExperiment       bool
+	ThroughputExperiment bool
+	RulePosition         string // "first" (best-case) or "last" (worst-case)
 }
 
 // ---------------- Service Management ----------------
@@ -534,8 +535,42 @@ func RunFullExperiment(config TestConfig) {
 			fmt.Printf("Worker position: N/A (nftables uses O(1) hash lookup)\n")
 		}
 
+		// Start CPU metrics collection for this service count iteration
+		ctx, cancel := context.WithCancel(context.Background())
+		metricsChan := make(chan []CPUMetric, 100)
+
+		cpuLogFile := fmt.Sprintf("logs/dataplane/cpu_PM_%s_SC_%d_%s.csv",
+			config.ProxyMode, serviceCount, timestamp)
+		cpuF, cpuErr := os.Create(cpuLogFile)
+		if cpuErr == nil {
+			fmt.Fprintf(cpuF, "Timestamp,Node,CPU_Percent\n")
+		}
+
+		var wgMetrics sync.WaitGroup
+		wgMetrics.Add(1)
+		go func() {
+			defer wgMetrics.Done()
+			for metrics := range metricsChan {
+				if cpuErr == nil {
+					for _, m := range metrics {
+						fmt.Fprintf(cpuF, "%s,%s,%.2f\n", m.Timestamp.Format(time.RFC3339), m.NodeName, m.CPU)
+					}
+				}
+			}
+			if cpuErr == nil {
+				cpuF.Close()
+			}
+		}()
+
+		// Start producer
+		go collectCPUMetrics(ctx, metricsChan, 2*time.Second)
+
 		// Run test and capture results
 		results := runTestAndGetResults(testConfig, currentWorkerPosition, currentTotalRules)
+
+		// Stop CPU metrics collection
+		cancel()
+		wgMetrics.Wait()
 
 		if len(results) == 0 {
 			fmt.Printf("ERROR: No results for %d services\n", serviceCount)
@@ -720,6 +755,181 @@ func runTestAndGetResults(config TestConfig, workerPosition int, totalRules int)
 	return results
 }
 
+// ---------------- CPU Metric Collection ----------------
+type CPUMetric struct {
+	Timestamp time.Time
+	NodeName  string
+	CPU       float64
+}
+
+func collectCPUMetrics(ctx context.Context, metricsChan chan<- []CPUMetric, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			close(metricsChan)
+			return
+		case <-ticker.C:
+			// Run kubectl top nodes
+			cmd := exec.CommandContext(ctx, "kubectl", "top", "nodes", "--no-headers")
+			output, err := cmd.Output()
+			if err != nil {
+				continue // Skip on error
+			}
+
+			var metrics []CPUMetric
+			now := time.Now()
+			lines := strings.Split(string(output), "\n")
+			for _, line := range lines {
+				parts := strings.Fields(line)
+				if len(parts) >= 3 {
+					nodeName := parts[0]
+					cpuStr := parts[2]
+					// e.g. "34%"
+					cpuStr = strings.TrimSuffix(cpuStr, "%")
+					cpuVal, _ := strconv.ParseFloat(cpuStr, 64)
+					metrics = append(metrics, CPUMetric{
+						Timestamp: now,
+						NodeName:  nodeName,
+						CPU:       cpuVal,
+					})
+				}
+			}
+			if len(metrics) > 0 {
+				metricsChan <- metrics
+			}
+		}
+	}
+}
+
+// ---------------- Throughput Experiment ----------------
+func RunThroughputExperiment(config TestConfig) {
+	rpsValues := []int{500, 1000, 2000, 5000, 10000}
+
+	fmt.Printf("\n=== Data Plane Throughput Experiment Suite ===\n")
+	fmt.Printf("  RPS values to test: %v\n", rpsValues)
+	fmt.Printf("  Requests per test: %d\n", config.NumRequests)
+	fmt.Printf("  Proxy mode: %s\n", config.ProxyMode)
+	fmt.Printf("  Service count: %d\n", config.ServiceCount)
+	fmt.Printf("  Worker: %s\n", config.WorkerAddr)
+	fmt.Printf("\n")
+
+	// Create summary CSV
+	timestamp := time.Now().Format("20060102_150405")
+	os.MkdirAll("logs/throughput", os.ModePerm)
+	summaryFile := fmt.Sprintf("logs/throughput/throughput_summary_%s.csv", timestamp)
+
+	f, err := os.Create(summaryFile)
+	if err != nil {
+		log.Fatalf("Failed to create summary file: %v", err)
+	}
+	defer f.Close()
+
+	// Write CSV header
+	fmt.Fprintf(f, "RPS,ServiceCount,ProxyMode,WorkerPosition,TotalRules,NumRequests,SuccessRate,MeanLatency_us,P50_us,P95_us,P99_us,RTTMean_us,RTTP95_us,RTTP99_us,LogFile\n")
+	fmt.Printf("Results will be saved to: %s\n\n", summaryFile)
+
+	// Verify worker is accessible (test connection)
+	fmt.Printf("Testing connection to worker at %s...\n", config.WorkerAddr)
+	testConn, err := grpc.Dial(config.WorkerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("Failed to connect: %v", err)
+	}
+	testConn.Close()
+	fmt.Println("✓ Worker accessible\n")
+
+	// Detect worker position in iptables chain
+	workerIP := strings.Split(config.WorkerAddr, ":")[0]
+	workerPosition, totalRules := getWorkerPosition(workerIP, config.ProxyMode)
+
+	// Main experiment loop
+	for _, targetRPS := range rpsValues {
+		fmt.Printf("\n========================================\n")
+		fmt.Printf("Testing with %d RPS\n", targetRPS)
+		fmt.Printf("========================================\n\n")
+
+		testConfig := config
+		testConfig.RPS = targetRPS
+
+		fmt.Printf("Run 'kubectl top nodes' during this time to check CPU utilization!\n")
+
+		// Start CPU metrics collection
+		ctx, cancel := context.WithCancel(context.Background())
+		metricsChan := make(chan []CPUMetric, 100)
+
+		// Create CPU log file
+		cpuLogFile := fmt.Sprintf("logs/throughput/cpu_PM_%s_SC_%d_RPS_%d_%s.csv",
+			config.ProxyMode, config.ServiceCount, targetRPS, timestamp)
+		cpuF, _ := os.Create(cpuLogFile)
+		fmt.Fprintf(cpuF, "Timestamp,Node,CPU_Percent\n")
+
+		// Consume metrics asynchronously
+		var wgMetrics sync.WaitGroup
+		wgMetrics.Add(1)
+		go func() {
+			defer wgMetrics.Done()
+			for metrics := range metricsChan {
+				for _, m := range metrics {
+					fmt.Fprintf(cpuF, "%s,%s,%.2f\n", m.Timestamp.Format(time.RFC3339), m.NodeName, m.CPU)
+				}
+			}
+			cpuF.Close()
+		}()
+
+		// Start producer
+		go collectCPUMetrics(ctx, metricsChan, 2*time.Second)
+
+		// Run test and capture results
+		results := runTestAndGetResults(testConfig, workerPosition, totalRules)
+
+		// Stop CPU metrics collection
+		cancel()
+		wgMetrics.Wait()
+
+		if len(results) == 0 {
+			fmt.Printf("ERROR: No results for %d RPS\n", targetRPS)
+			fmt.Fprintf(f, "%d,%d,%s,%d,%d,0.00,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/\n",
+				targetRPS, config.ServiceCount, config.ProxyMode, config.NumRequests)
+			continue
+		}
+
+		// Calculate statistics
+		stats := calculateStatistics(results)
+		successRate := float64(len(results)) / float64(config.NumRequests) * 100.0
+
+		// Find the log file
+		logPattern := fmt.Sprintf("logs/dataplane/PM_%s_SC_%d_RPS_%d_*.log", config.ProxyMode, config.ServiceCount, targetRPS)
+		logFile := "N/A"
+		if matches, _ := filepath.Glob(logPattern); len(matches) > 0 {
+			logFile = matches[len(matches)-1]
+		}
+
+		// Write to summary CSV
+		fmt.Fprintf(f, "%d,%d,%s,%d,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s\n",
+			targetRPS, config.ServiceCount, config.ProxyMode, workerPosition, totalRules, config.NumRequests, successRate,
+			stats.Mean, stats.P50, stats.P95, stats.P99,
+			stats.RTTMean, stats.RTTP95, stats.RTTP99, logFile)
+
+		// Quick summary
+		fmt.Printf("\nQuick Summary:\n")
+		fmt.Printf("  Target RPS: %d\n", targetRPS)
+		fmt.Printf("  Success rate: %.2f%%\n", successRate)
+		fmt.Printf("  Mean latency: %.2f µs\n", stats.Mean)
+		fmt.Printf("  P95 latency: %.2f µs\n", stats.P95)
+		fmt.Printf("  P99 latency: %.2f µs\n", stats.P99)
+
+		if targetRPS != rpsValues[len(rpsValues)-1] {
+			fmt.Printf("\nPausing 10 seconds before next test...\n")
+			time.Sleep(10 * time.Second)
+		}
+	}
+
+	fmt.Printf("\n✓ Throughput experiment finished!\n")
+	fmt.Printf("\nResults saved to: %s\n", summaryFile)
+}
+
 // ---------------- Main ----------------
 func main() {
 	fmt.Println("Data Plane Latency Test - gRPC Load Generator")
@@ -730,6 +940,7 @@ func main() {
 	proxyMode := flag.String("proxy-mode", "unknown", "Kube-proxy mode: iptables-nft or nftables")
 	serviceCount := flag.Int("service-count", 1, "Number of services in cluster (single test mode)")
 	fullExperiment := flag.Bool("full-experiment", false, "Run full experiment at multiple service counts (100/1k/5k/10k/20k)")
+	throughputExperiment := flag.Bool("throughput-experiment", false, "Run throughput experiment at multiple RPS (1000/2000/5000/10000)")
 	rulePosition := flag.String("rule-position", "last", "Worker rule position: first (best-case O(1)) or last (worst-case O(n))")
 	flag.Parse()
 
@@ -743,18 +954,21 @@ func main() {
 	}
 
 	config := TestConfig{
-		WorkerAddr:     *workerAddr,
-		RPS:            *rps,
-		NumRequests:    *numRequests,
-		ProxyMode:      *proxyMode,
-		ServiceCount:   *serviceCount,
-		FullExperiment: *fullExperiment,
-		RulePosition:   *rulePosition,
+		WorkerAddr:           *workerAddr,
+		RPS:                  *rps,
+		NumRequests:          *numRequests,
+		ProxyMode:            *proxyMode,
+		ServiceCount:         *serviceCount,
+		FullExperiment:       *fullExperiment,
+		ThroughputExperiment: *throughputExperiment,
+		RulePosition:         *rulePosition,
 	}
 
 	if config.FullExperiment {
 		// Full experiment mode - automated testing at multiple scales
 		RunFullExperiment(config)
+	} else if config.ThroughputExperiment {
+		RunThroughputExperiment(config)
 	} else {
 		// Single test mode - test connection first
 		fmt.Printf("\nTesting connection to worker at %s...\n", config.WorkerAddr)
