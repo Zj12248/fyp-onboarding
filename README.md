@@ -383,7 +383,8 @@ ServiceCount,ProxyMode,WorkerPosition,TotalRules,NumRequests,SuccessRate,MeanLat
 
 - `--worker` - Worker gRPC endpoint (host:port)
 - `--rps` - Requests per second (default: 200)
-- `--num-requests` - Total requests to send (default: 10000)
+- `--num-requests` - Total requests to send for single/full mode (default: 10000)
+- `--duration` - Total duration in seconds for throughput scaling mode (default: 30)
 - `--proxy-mode` - Kube-proxy mode: `iptables-nft` or `nftables`
 - `--service-count` - Service count for single test mode (default: 1)
 - `--full-experiment` - Run full experiment at 100/1k/5k/10k/20k services

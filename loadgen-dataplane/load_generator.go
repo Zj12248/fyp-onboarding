@@ -308,6 +308,7 @@ func percentile(sorted []float64, p float64) float64 {
 type TestConfig struct {
 	WorkerAddr           string
 	RPS                  int
+	Duration             int // Time to run the test in seconds (used in throughput experiment)
 	NumRequests          int
 	ProxyMode            string
 	ServiceCount         int
@@ -852,6 +853,7 @@ func RunThroughputExperiment(config TestConfig) {
 
 		testConfig := config
 		testConfig.RPS = targetRPS
+		testConfig.NumRequests = targetRPS * testConfig.Duration // Scaling requests to maintain strict duration
 
 		fmt.Printf("Run 'kubectl top nodes' during this time to check CPU utilization!\n")
 
@@ -936,7 +938,8 @@ func main() {
 
 	workerAddr := flag.String("worker", "localhost:50051", "Worker gRPC host:port")
 	rps := flag.Int("rps", 200, "Requests per second")
-	numRequests := flag.Int("num-requests", 10000, "Total number of requests to send")
+	numRequests := flag.Int("num-requests", 10000, "Total number of requests to send (for normal experiment)")
+	duration := flag.Int("duration", 30, "Duration of the test in seconds (for throughput experiment)")
 	proxyMode := flag.String("proxy-mode", "unknown", "Kube-proxy mode: iptables-nft or nftables")
 	serviceCount := flag.Int("service-count", 1, "Number of services in cluster (single test mode)")
 	fullExperiment := flag.Bool("full-experiment", false, "Run full experiment at multiple service counts (100/1k/5k/10k/20k)")
@@ -956,6 +959,7 @@ func main() {
 	config := TestConfig{
 		WorkerAddr:           *workerAddr,
 		RPS:                  *rps,
+		Duration:             *duration,
 		NumRequests:          *numRequests,
 		ProxyMode:            *proxyMode,
 		ServiceCount:         *serviceCount,
